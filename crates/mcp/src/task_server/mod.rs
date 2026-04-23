@@ -44,6 +44,16 @@ pub struct McpContext {
 pub enum McpMode {
     Global,
     Orchestrator,
+    ProjectOrchestrator { project_id: Uuid },
+}
+
+impl McpMode {
+    pub fn project_id(&self) -> Option<Uuid> {
+        match self {
+            Self::ProjectOrchestrator { project_id } => Some(*project_id),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -76,6 +86,16 @@ impl McpServer {
         }
     }
 
+    pub fn new_project_orchestrator(base_url: &str, project_id: Uuid) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            base_url: base_url.to_string(),
+            tool_router: Self::project_orchestrator_mode_router(),
+            context: None,
+            mode: McpMode::ProjectOrchestrator { project_id },
+        }
+    }
+
     fn url(&self, path: &str) -> String {
         format!(
             "{}/{}",
@@ -103,6 +123,10 @@ impl McpServer {
     }
 
     async fn fetch_context_at_startup(&self) -> anyhow::Result<Option<McpContext>> {
+        if matches!(self.mode(), McpMode::ProjectOrchestrator { .. }) {
+            return Ok(None);
+        }
+
         let current_dir = std::env::current_dir().context("Failed to resolve current directory")?;
         let canonical_path = current_dir.canonicalize().unwrap_or(current_dir);
         let normalized_path = utils::path::normalize_macos_private_alias(&canonical_path);

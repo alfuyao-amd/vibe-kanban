@@ -1,0 +1,58 @@
+name: smoke_success
+version: 1
+description: |
+  Minimal always-passing procedure for end-to-end validation of the
+  state machine, gates, and persistence loop. Walks plan -> review ->
+  human_approval -> merge -> success.
+
+triggers:
+  match_hints:
+    - "smoke test"
+  params:
+    goal:
+      type: string
+      required: true
+      description: Dummy goal string; not used by actions.
+
+initial_state: plan
+
+states:
+  plan:
+    action:
+      kind: create_session
+      executor: CLAUDE_CODE
+      prompt: "Plan: {{goal}}"
+    gate:
+      kind: deterministic
+      run: "true"
+      pass_when: "exit_code == 0"
+    on_success: review
+    on_failure: failed
+
+  review:
+    action:
+      kind: start_review
+      session_ref: plan
+      executor: CLAUDE_CODE
+      prompt: "Review."
+    gate:
+      kind: llm_judge
+      pass_when: "response.verdict == 'pass'"
+    on_success: human_approval
+    on_failure: failed
+
+  human_approval:
+    gate:
+      kind: human
+      prompt: "Approve?"
+    on_success: merge
+    on_failure: failed
+
+  merge:
+    action:
+      kind: merge
+      session_ref: plan
+    terminal: success
+
+  failed:
+    terminal: failure

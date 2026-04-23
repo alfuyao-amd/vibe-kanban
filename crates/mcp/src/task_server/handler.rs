@@ -24,6 +24,9 @@ impl ServerHandler for McpServer {
             McpMode::Orchestrator => {
                 "An orchestrator-scoped Vibe Kanban MCP server with tools limited to the configured workspace and orchestrator session context."
             }
+            McpMode::ProjectOrchestrator { .. } => {
+                "A project-scoped Vibe Kanban lead-agent MCP server. Drives workers ad-hoc via orchestrator tools or runs declarative YAML procedures as a state machine."
+            }
         };
         let mut instruction = format!(
             "{} Use list/read tools first when you need IDs or current state. TOOLS: {}.",

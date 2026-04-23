@@ -30,6 +30,20 @@ export type CreateTag = { tag_name: string, content: string, };
 
 export type UpdateTag = { tag_name: string | null, content: string | null, };
 
+export type ProcedureRun = { id: string, project_id: string, procedure_name: string, procedure_version: bigint, current_state: string, status: string, params: Record<string, unknown>, state_history: Array<StateHistoryEntry>, workspace_id: string | null, created_at: Date, updated_at: Date, };
+
+export type ProcedureRunStatus = "running" | "succeeded" | "failed" | "cancelled";
+
+export type StateHistoryEntry = { state: string, entered_at: Date, exited_at: Date | null, outcome: StateOutcome | null, gate_summary: string | null, attempt: number, };
+
+export type StateOutcome = "success" | "failure" | "cancelled";
+
+export type CreateProcedureRun = { procedure_name: string, procedure_version: bigint, initial_state: string, params: Record<string, unknown>, workspace_id: string | null, };
+
+export type ProcedureSummary = { name: string, version: number, description: string, initial_state: string, };
+
+export type StartProcedureRequest = { procedure_name: string, params: Record<string, unknown>, workspace_id: string | null, };
+
 export type DraftFollowUpData = { message: string, executor_config: ExecutorConfig, };
 
 export type DraftWorkspaceData = { message: string, repos: Array<DraftWorkspaceRepo>, executor_config: ExecutorConfig | null, linked_issue: DraftWorkspaceLinkedIssue | null, attachments: Array<DraftWorkspaceAttachment>, };

@@ -1,0 +1,108 @@
+name: feature_with_tests
+version: 1
+description: |
+  Implement a well-specified feature with tests, have a cross-vendor agent
+  review the diff, and merge after human approval.
+
+triggers:
+  match_hints:
+    - "add feature"
+    - "implement"
+    - "build X with tests"
+  params:
+    goal:
+      type: string
+      required: true
+      description: One-sentence description of the feature to build.
+    target_files:
+      type: array
+      items: string
+      required: false
+      description: Optional file paths hinting where the change belongs.
+
+initial_state: plan
+
+states:
+  plan:
+    action:
+      kind: create_session
+      executor: claude-opus-4-7
+      prompt: |
+        Plan the implementation of: {{goal}}
+        Return: (1) files to touch, (2) test cases to add. Keep it brief.
+    on_success: implement
+    on_failure: failed
+
+  implement:
+    action:
+      kind: follow_up
+      session_ref: plan
+      executor: claude-opus-4-7
+      prompt: |
+        Implement the plan. Write code AND tests. Keep the diff minimal.
+    gate:
+      kind: deterministic
+      run: "{{project.dev_script}}"
+      pass_when: "exit_code == 0"
+    on_success: review
+    on_failure: implement_retry
+
+  implement_retry:
+    action:
+      kind: follow_up
+      session_ref: plan
+      executor: claude-opus-4-7
+      prompt: |
+        Tests failed. Output:
+        {{gate.output}}
+        Fix and rerun.
+    max_attempts: 2
+    gate:
+      kind: deterministic
+      run: "{{project.dev_script}}"
+      pass_when: "exit_code == 0"
+    on_success: review
+    on_failure: failed
+
+  review:
+    action:
+      kind: start_review
+      session_ref: plan
+      executor: codex
+      prompt: |
+        Review this diff for correctness, style, and security.
+        Respond as JSON: {"verdict": "pass"|"fail", "feedback": "..."}
+    gate:
+      kind: llm_judge
+      pass_when: "response.verdict == 'pass'"
+    on_success: human_approval
+    on_failure: address_review
+
+  address_review:
+    action:
+      kind: follow_up
+      session_ref: plan
+      executor: claude-opus-4-7
+      prompt: |
+        Reviewer feedback:
+        {{gate.response.feedback}}
+        Address and resubmit for review.
+    max_attempts: 2
+    on_success: review
+    on_failure: failed
+
+  human_approval:
+    gate:
+      kind: human
+      prompt: "Approve merge of {{diff_url}}?"
+    on_success: merge
+    on_failure: failed
+
+  merge:
+    action:
+      kind: merge
+      session_ref: plan
+    terminal: success
+
+  failed:
+    terminal: failure

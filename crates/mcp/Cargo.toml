@@ -14,6 +14,7 @@ uninlined-format-args = "allow"
 [dependencies]
 api-types = { path = "../api-types" }
 db = { path = "../db" }
+orchestration = { path = "../orchestration" }
 executors = { path = "../executors" }
 utils = { path = "../utils" }
 tokio = { workspace = true }

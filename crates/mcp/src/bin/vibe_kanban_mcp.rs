@@ -5,6 +5,7 @@ use utils::{
     port_file::read_port_file,
     sentry::{self as sentry_utils, SentrySource, sentry_layer},
 };
+use uuid::Uuid;
 
 const HOST_ENV: &str = "MCP_HOST";
 const PORT_ENV: &str = "MCP_PORT";
@@ -13,11 +14,13 @@ const PORT_ENV: &str = "MCP_PORT";
 enum McpLaunchMode {
     Global,
     Orchestrator,
+    ProjectOrchestrator,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LaunchConfig {
     mode: McpLaunchMode,
+    project_id: Option<Uuid>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -32,11 +35,19 @@ fn main() -> anyhow::Result<()> {
             init_process_logging("vibe-kanban-mcp", version);
 
             let base_url = resolve_base_url("vibe-kanban-mcp").await?;
-            let LaunchConfig { mode } = launch_config;
+            let LaunchConfig { mode, project_id } = launch_config;
 
             let server = match mode {
                 McpLaunchMode::Global => McpServer::new_global(&base_url),
                 McpLaunchMode::Orchestrator => McpServer::new_orchestrator(&base_url),
+                McpLaunchMode::ProjectOrchestrator => {
+                    let project_id = project_id.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "--project-id <uuid> is required when --mode=project-orchestrator"
+                        )
+                    })?;
+                    McpServer::new_project_orchestrator(&base_url, project_id)
+                }
             };
 
             let service = server.init().await?.serve(stdio()).await.map_err(|error| {
@@ -58,21 +69,34 @@ where
     I: Iterator<Item = String>,
 {
     let mut mode = None;
+    let mut project_id: Option<Uuid> = None;
 
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--mode" => {
                 mode = Some(args.next().ok_or_else(|| {
-                    anyhow::anyhow!("Missing value for --mode. Expected 'global' or 'orchestrator'")
+                    anyhow::anyhow!(
+                        "Missing value for --mode. Expected 'global', 'orchestrator', or 'project-orchestrator'"
+                    )
+                })?);
+            }
+            "--project-id" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("Missing value for --project-id"))?;
+                project_id = Some(Uuid::parse_str(&value).map_err(|error| {
+                    anyhow::anyhow!("Invalid --project-id '{}': {}", value, error)
                 })?);
             }
             "-h" | "--help" => {
-                println!("Usage: vibe-kanban-mcp --mode <global|orchestrator>");
+                println!(
+                    "Usage: vibe-kanban-mcp --mode <global|orchestrator|project-orchestrator> [--project-id <uuid>]"
+                );
                 std::process::exit(0);
             }
             _ => {
                 return Err(anyhow::anyhow!(
-                    "Unknown argument '{arg}'. Usage: vibe-kanban-mcp --mode <global|orchestrator>"
+                    "Unknown argument '{arg}'. Usage: vibe-kanban-mcp --mode <global|orchestrator|project-orchestrator> [--project-id <uuid>]"
                 ));
             }
         }
@@ -87,14 +111,21 @@ where
     {
         "global" => McpLaunchMode::Global,
         "orchestrator" => McpLaunchMode::Orchestrator,
+        "project-orchestrator" => McpLaunchMode::ProjectOrchestrator,
         value => {
             return Err(anyhow::anyhow!(
-                "Invalid MCP mode '{value}'. Expected 'global' or 'orchestrator'"
+                "Invalid MCP mode '{value}'. Expected 'global', 'orchestrator', or 'project-orchestrator'"
             ));
         }
     };
 
-    Ok(LaunchConfig { mode })
+    if matches!(mode, McpLaunchMode::ProjectOrchestrator) && project_id.is_none() {
+        return Err(anyhow::anyhow!(
+            "--project-id <uuid> is required when --mode=project-orchestrator"
+        ));
+    }
+
+    Ok(LaunchConfig { mode, project_id })
 }
 
 async fn resolve_base_url(log_prefix: &str) -> anyhow::Result<String> {
@@ -158,6 +189,8 @@ fn init_process_logging(log_prefix: &str, version: &str) {
 
 #[cfg(test)]
 mod tests {
+    use uuid::Uuid;
+
     use super::{LaunchConfig, McpLaunchMode, resolve_launch_config_from_iter};
 
     #[test]
@@ -170,7 +203,8 @@ mod tests {
         assert_eq!(
             config,
             LaunchConfig {
-                mode: McpLaunchMode::Orchestrator
+                mode: McpLaunchMode::Orchestrator,
+                project_id: None,
             }
         );
     }
@@ -192,6 +226,39 @@ mod tests {
             error
                 .to_string()
                 .contains("Unknown argument '--session-id'")
+        );
+    }
+
+    #[test]
+    fn project_orchestrator_requires_project_id() {
+        let error = resolve_launch_config_from_iter(
+            ["--mode".to_string(), "project-orchestrator".to_string()].into_iter(),
+        )
+        .expect_err("project-orchestrator without project_id should fail");
+
+        assert!(error.to_string().contains("--project-id"));
+    }
+
+    #[test]
+    fn project_orchestrator_parses_project_id() {
+        let pid = "550e8400-e29b-41d4-a716-446655440000";
+        let config = resolve_launch_config_from_iter(
+            [
+                "--mode".to_string(),
+                "project-orchestrator".to_string(),
+                "--project-id".to_string(),
+                pid.to_string(),
+            ]
+            .into_iter(),
+        )
+        .expect("config should parse");
+
+        assert_eq!(
+            config,
+            LaunchConfig {
+                mode: McpLaunchMode::ProjectOrchestrator,
+                project_id: Some(Uuid::parse_str(pid).unwrap()),
+            }
         );
     }
 }

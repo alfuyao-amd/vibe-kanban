@@ -40,6 +40,7 @@ mod context;
 mod issue_assignees;
 mod issue_relationships;
 mod issue_tags;
+mod orchestration;
 mod organizations;
 mod remote_issues;
 mod remote_projects;
@@ -70,6 +71,10 @@ impl McpServer {
         router.remove_route("list_workspaces");
         router.remove_route("delete_workspace");
         router
+    }
+
+    pub fn project_orchestrator_mode_router() -> rmcp::handler::server::tool::ToolRouter<Self> {
+        Self::orchestration_tools_router()
     }
 }
 
@@ -409,6 +414,17 @@ mod tests {
             .into_iter()
             .map(|tool| tool.name.to_string())
             .collect()
+    }
+
+    #[test]
+    fn project_orchestrator_mode_exposes_procedure_tools() {
+        let actual = tool_names(McpServer::project_orchestrator_mode_router());
+        assert!(actual.contains("list_procedures"));
+        assert!(actual.contains("start_procedure"));
+        assert!(actual.contains("get_procedure_state"));
+        assert!(actual.contains("cancel_procedure"));
+        assert!(!actual.contains("create_session"));
+        assert!(!actual.contains("list_workspaces"));
     }
 
     #[test]

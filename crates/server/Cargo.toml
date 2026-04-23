@@ -16,6 +16,7 @@ utils = { path = "../utils" }
 git = { path = "../git" }
 git-host = { path = "../git-host" }
 db = { path = "../db" }
+orchestration = { path = "../orchestration" }
 services = { path = "../services" }
 worktree-manager = { path = "../worktree-manager" }
 workspace-manager = { path = "../workspace-manager" }
@@ -39,6 +40,7 @@ axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+async-trait = "0.1"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "sqlite", "sqlite-preupdate-hook", "chrono", "uuid"] }
@@ -72,6 +74,7 @@ dotenv = "0.15"
 
 [dev-dependencies]
 tempfile = "3"
+wiremock = "0.6"
 
 [features]
 default = []

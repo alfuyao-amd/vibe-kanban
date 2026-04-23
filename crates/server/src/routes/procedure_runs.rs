@@ -1,0 +1,130 @@
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    response::Json as ResponseJson,
+    routing::{get, post},
+};
+use db::models::procedure_run::{CreateProcedureRun, ProcedureRun, ProcedureRunStatus};
+use deployment::Deployment;
+use orchestration::Procedure;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+use utils::response::ApiResponse;
+use uuid::Uuid;
+
+use crate::{DeploymentImpl, error::ApiError, procedure_runtime};
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ProcedureSummary {
+    pub name: String,
+    pub version: u32,
+    pub description: String,
+    pub initial_state: String,
+}
+
+impl From<&Procedure> for ProcedureSummary {
+    fn from(p: &Procedure) -> Self {
+        Self {
+            name: p.name.clone(),
+            version: p.version,
+            description: p.description.clone(),
+            initial_state: p.initial_state.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, TS)]
+pub struct StartProcedureRequest {
+    pub procedure_name: String,
+    #[ts(type = "Record<string, unknown>")]
+    pub params: serde_json::Value,
+    pub workspace_id: Option<Uuid>,
+}
+
+pub async fn list_procedures() -> Result<ResponseJson<ApiResponse<Vec<ProcedureSummary>>>, ApiError>
+{
+    let procedures = orchestration::builtin_procedures()
+        .map_err(|e| ApiError::BadRequest(format!("failed to load procedures: {e}")))?;
+    let summaries = procedures.iter().map(ProcedureSummary::from).collect();
+    Ok(ResponseJson(ApiResponse::success(summaries)))
+}
+
+pub async fn start_procedure_run(
+    State(deployment): State<DeploymentImpl>,
+    Path(project_id): Path<Uuid>,
+    Json(req): Json<StartProcedureRequest>,
+) -> Result<ResponseJson<ApiResponse<ProcedureRun>>, ApiError> {
+    let procedures = orchestration::builtin_procedures()
+        .map_err(|e| ApiError::BadRequest(format!("failed to load procedures: {e}")))?;
+    let procedure = procedures
+        .into_iter()
+        .find(|p| p.name == req.procedure_name)
+        .ok_or_else(|| {
+            ApiError::BadRequest(format!("unknown procedure `{}`", req.procedure_name))
+        })?;
+
+    let data = CreateProcedureRun {
+        procedure_name: procedure.name.clone(),
+        procedure_version: procedure.version as i64,
+        initial_state: procedure.initial_state.clone(),
+        params: req.params.clone(),
+        workspace_id: req.workspace_id,
+    };
+
+    let run = ProcedureRun::create(&deployment.db().pool, project_id, &data).await?;
+
+    procedure_runtime::spawn_procedure_run(
+        deployment.db().pool.clone(),
+        run.id,
+        procedure,
+        req.params,
+    );
+
+    Ok(ResponseJson(ApiResponse::success(run)))
+}
+
+pub async fn list_procedure_runs_for_project(
+    State(deployment): State<DeploymentImpl>,
+    Path(project_id): Path<Uuid>,
+) -> Result<ResponseJson<ApiResponse<Vec<ProcedureRun>>>, ApiError> {
+    let runs = ProcedureRun::list_for_project(&deployment.db().pool, project_id).await?;
+    Ok(ResponseJson(ApiResponse::success(runs)))
+}
+
+pub async fn get_procedure_run(
+    State(deployment): State<DeploymentImpl>,
+    Path(run_id): Path<Uuid>,
+) -> Result<ResponseJson<ApiResponse<ProcedureRun>>, ApiError> {
+    let run = ProcedureRun::find_by_id(&deployment.db().pool, run_id)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest(format!("procedure run `{run_id}` not found")))?;
+    Ok(ResponseJson(ApiResponse::success(run)))
+}
+
+pub async fn cancel_procedure_run(
+    State(deployment): State<DeploymentImpl>,
+    Path(run_id): Path<Uuid>,
+) -> Result<ResponseJson<ApiResponse<ProcedureRun>>, ApiError> {
+    let run = ProcedureRun::cancel(&deployment.db().pool, run_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError::BadRequest(format!("procedure run `{run_id}` not found or not running"))
+        })?;
+
+    let _ = ProcedureRunStatus::Cancelled;
+    Ok(ResponseJson(ApiResponse::success(run)))
+}
+
+pub fn router() -> Router<DeploymentImpl> {
+    Router::new()
+        .route("/procedures", get(list_procedures))
+        .route(
+            "/projects/{project_id}/procedure-runs",
+            get(list_procedure_runs_for_project).post(start_procedure_run),
+        )
+        .route("/procedure-runs/{run_id}", get(get_procedure_run))
+        .route(
+            "/procedure-runs/{run_id}/cancel",
+            post(cancel_procedure_run),
+        )
+}

@@ -25,6 +25,7 @@ members = [
     "crates/local-deployment",
     "crates/deployment",
     "crates/review",
+    "crates/orchestration",
     "crates/embedded-ssh",
     "crates/desktop-bridge",
     "crates/tauri-app",
