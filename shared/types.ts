@@ -30,9 +30,9 @@ export type CreateTag = { tag_name: string, content: string, };
 
 export type UpdateTag = { tag_name: string | null, content: string | null, };
 
-export type ProcedureRun = { id: string, project_id: string, procedure_name: string, procedure_version: bigint, current_state: string, status: string, params: Record<string, unknown>, state_history: Array<StateHistoryEntry>, workspace_id: string | null, created_at: Date, updated_at: Date, };
+export type ProcedureRun = { id: string, project_id: string, procedure_name: string, procedure_version: bigint, current_state: string, status: string, params: Record<string, unknown>, state_history: Array<StateHistoryEntry>, workspace_id: string | null, pending_approval_prompt: string | null, created_at: Date, updated_at: Date, };
 
-export type ProcedureRunStatus = "running" | "succeeded" | "failed" | "cancelled";
+export type ProcedureRunStatus = "running" | "awaiting_approval" | "succeeded" | "failed" | "cancelled";
 
 export type StateHistoryEntry = { state: string, entered_at: Date, exited_at: Date | null, outcome: StateOutcome | null, gate_summary: string | null, attempt: number, };
 

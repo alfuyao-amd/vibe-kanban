@@ -1,4 +1,9 @@
-use std::{str::FromStr, time::Duration};
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -9,8 +14,8 @@ use executors::{executors::BaseCodingAgent, profile::ExecutorConfig};
 use orchestration::{
     ExecutionBackend, Procedure,
     gates::{
-        ApprovalResult, AutoApprove, DeterministicGateEvaluator, HumanGateEvaluator,
-        LlmJudgeGateEvaluator, StaticLlmJudgeSource,
+        ApprovalResult, AutoApprove, ContextLlmJudge, DeterministicGateEvaluator, GateError,
+        HumanApprovalSource, HumanGateEvaluator,
     },
     state_machine::{
         BackendError, ExecutionId, ExecutionOutput, GateEvaluators, MergeOutcome,
@@ -19,9 +24,12 @@ use orchestration::{
     },
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use sqlx::SqlitePool;
-use tokio::task::JoinHandle;
+use tokio::{
+    sync::{Mutex, mpsc},
+    task::JoinHandle,
+};
 use uuid::Uuid;
 
 pub struct DbRunStore {
@@ -109,6 +117,80 @@ impl RunStore for DbRunStore {
     }
 }
 
+/// Per-process registry mapping a procedure run to its pending-approval channel.
+/// HTTP approve/reject handlers push into the sender; the run's HumanApprovalSource
+/// reads from the receiver.
+#[derive(Clone, Default)]
+pub struct ProcedureApprovalRegistry {
+    inner: Arc<Mutex<HashMap<Uuid, mpsc::Sender<ApprovalResult>>>>,
+}
+
+impl ProcedureApprovalRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn register(&self, run_id: Uuid, tx: mpsc::Sender<ApprovalResult>) {
+        self.inner.lock().await.insert(run_id, tx);
+    }
+
+    pub async fn deregister(&self, run_id: Uuid) {
+        self.inner.lock().await.remove(&run_id);
+    }
+
+    pub async fn signal(&self, run_id: Uuid, result: ApprovalResult) -> bool {
+        let sender = self.inner.lock().await.get(&run_id).cloned();
+        match sender {
+            Some(tx) => tx.send(result).await.is_ok(),
+            None => false,
+        }
+    }
+}
+
+static APPROVALS: OnceLock<ProcedureApprovalRegistry> = OnceLock::new();
+
+pub fn approvals() -> &'static ProcedureApprovalRegistry {
+    APPROVALS.get_or_init(ProcedureApprovalRegistry::new)
+}
+
+/// HumanApprovalSource that flips the DB row to awaiting_approval while it
+/// waits on the run's mpsc channel. Restores status when a signal arrives.
+struct RegistryApproval {
+    run_id: Uuid,
+    pool: SqlitePool,
+    rx: Mutex<mpsc::Receiver<ApprovalResult>>,
+}
+
+impl RegistryApproval {
+    async fn install(run_id: Uuid, pool: SqlitePool) -> Self {
+        let (tx, rx) = mpsc::channel(4);
+        approvals().register(run_id, tx).await;
+        Self {
+            run_id,
+            pool,
+            rx: Mutex::new(rx),
+        }
+    }
+}
+
+#[async_trait]
+impl HumanApprovalSource for RegistryApproval {
+    async fn wait_for_approval(&self, prompt: &str) -> Result<ApprovalResult, GateError> {
+        if let Err(err) = ProcedureRun::set_awaiting_approval(&self.pool, self.run_id, prompt).await
+        {
+            tracing::warn!(run_id = %self.run_id, %err, "failed to set awaiting_approval");
+        }
+        let result = {
+            let mut guard = self.rx.lock().await;
+            guard.recv().await.ok_or(GateError::ApprovalChannelClosed)?
+        };
+        if let Err(err) = ProcedureRun::clear_awaiting_approval(&self.pool, self.run_id).await {
+            tracing::warn!(run_id = %self.run_id, %err, "failed to clear awaiting_approval");
+        }
+        Ok(result)
+    }
+}
+
 pub struct StubBackend;
 
 #[async_trait]
@@ -155,7 +237,11 @@ impl ExecutionBackend for StubBackend {
             stdout: "stub".to_string(),
             stderr: String::new(),
             exit_code: Some(0),
-            last_assistant_message: Some("stub response".to_string()),
+            // Valid JSON so that ContextLlmJudge can parse it when a review
+            // gate runs under the stub backend (e.g. smoke_success).
+            last_assistant_message: Some(
+                r#"{"verdict":"pass","feedback":"stub approved"}"#.to_string(),
+            ),
         })
     }
 }
@@ -507,16 +593,34 @@ impl ExecutionBackend for VkApiBackend {
     }
 }
 
-fn auto_approving_gates() -> GateEvaluators {
+async fn gates_for_run(run_id: Uuid, pool: SqlitePool) -> GateEvaluators {
+    let human: Box<dyn orchestration::gates::GateEvaluator> = if auto_approve_enabled() {
+        tracing::info!(
+            ?run_id,
+            "VIBE_PROCEDURE_AUTO_APPROVE set; human gates will auto-approve"
+        );
+        Box::new(HumanGateEvaluator::new(AutoApprove(
+            ApprovalResult::Approved,
+        )))
+    } else {
+        let source = RegistryApproval::install(run_id, pool).await;
+        Box::new(HumanGateEvaluator::new(source))
+    };
     GateEvaluators {
         deterministic: Box::new(DeterministicGateEvaluator),
-        llm_judge: Box::new(LlmJudgeGateEvaluator::new(StaticLlmJudgeSource(json!({
-            "verdict": "pass"
-        })))),
-        human: Box::new(HumanGateEvaluator::new(AutoApprove(
-            ApprovalResult::Approved,
-        ))),
+        llm_judge: Box::new(ContextLlmJudge),
+        human,
     }
+}
+
+fn auto_approve_enabled() -> bool {
+    matches!(
+        std::env::var("VIBE_PROCEDURE_AUTO_APPROVE")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    )
 }
 
 pub fn spawn_procedure_run(
@@ -528,9 +632,10 @@ pub fn spawn_procedure_run(
     let backend_kind = std::env::var("VIBE_PROCEDURE_BACKEND").unwrap_or_default();
     tokio::spawn(async move {
         let store = DbRunStore::new(pool.clone());
+        let gates = gates_for_run(run_id, pool.clone()).await;
         let outcome = if backend_kind.eq_ignore_ascii_case("stub") {
             tracing::info!(?run_id, "procedure run using StubBackend");
-            let executor = ProcedureExecutor::new(StubBackend, store, auto_approving_gates());
+            let executor = ProcedureExecutor::new(StubBackend, store, gates);
             executor
                 .run_with_id(RunId(run_id), &procedure, params)
                 .await
@@ -538,7 +643,7 @@ pub fn spawn_procedure_run(
             match VkApiBackend::from_env() {
                 Ok(backend) => {
                     tracing::info!(?run_id, base_url = %backend.base_url, "procedure run using VkApiBackend");
-                    let executor = ProcedureExecutor::new(backend, store, auto_approving_gates());
+                    let executor = ProcedureExecutor::new(backend, store, gates);
                     executor
                         .run_with_id(RunId(run_id), &procedure, params)
                         .await
@@ -547,6 +652,7 @@ pub fn spawn_procedure_run(
                     tracing::error!(?run_id, %err, "failed to resolve VkApiBackend base URL; aborting run");
                     let _ = ProcedureRun::update_status(&pool, run_id, ProcedureRunStatus::Failed)
                         .await;
+                    approvals().deregister(run_id).await;
                     return;
                 }
             }
@@ -559,12 +665,38 @@ pub fn spawn_procedure_run(
                     ProcedureRun::update_status(&pool, run_id, ProcedureRunStatus::Failed).await;
             }
         }
+        approvals().deregister(run_id).await;
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn approval_registry_delivers_signal_to_registered_run() {
+        let registry = ProcedureApprovalRegistry::new();
+        let run_id = Uuid::new_v4();
+        let (tx, mut rx) = mpsc::channel(1);
+        registry.register(run_id, tx).await;
+
+        let delivered = registry.signal(run_id, ApprovalResult::Approved).await;
+        assert!(delivered);
+        assert_eq!(rx.recv().await, Some(ApprovalResult::Approved));
+
+        registry.deregister(run_id).await;
+        let delivered_after = registry.signal(run_id, ApprovalResult::Rejected).await;
+        assert!(!delivered_after);
+    }
+
+    #[tokio::test]
+    async fn approval_registry_returns_false_for_unknown_run() {
+        let registry = ProcedureApprovalRegistry::new();
+        let delivered = registry
+            .signal(Uuid::new_v4(), ApprovalResult::Approved)
+            .await;
+        assert!(!delivered);
+    }
 
     #[test]
     fn converts_gate_pass_to_success_outcome() {

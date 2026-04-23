@@ -6,7 +6,7 @@ use axum::{
 };
 use db::models::procedure_run::{CreateProcedureRun, ProcedureRun, ProcedureRunStatus};
 use deployment::Deployment;
-use orchestration::Procedure;
+use orchestration::{Procedure, gates::ApprovalResult};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use utils::response::ApiResponse;
@@ -111,7 +111,49 @@ pub async fn cancel_procedure_run(
             ApiError::BadRequest(format!("procedure run `{run_id}` not found or not running"))
         })?;
 
+    // If the run was parked on a human gate, wake it so the task exits.
+    procedure_runtime::approvals()
+        .signal(run_id, ApprovalResult::Rejected)
+        .await;
+
     let _ = ProcedureRunStatus::Cancelled;
+    Ok(ResponseJson(ApiResponse::success(run)))
+}
+
+pub async fn approve_procedure_run(
+    State(deployment): State<DeploymentImpl>,
+    Path(run_id): Path<Uuid>,
+) -> Result<ResponseJson<ApiResponse<ProcedureRun>>, ApiError> {
+    resolve_procedure_approval(&deployment, run_id, ApprovalResult::Approved).await
+}
+
+pub async fn reject_procedure_run(
+    State(deployment): State<DeploymentImpl>,
+    Path(run_id): Path<Uuid>,
+) -> Result<ResponseJson<ApiResponse<ProcedureRun>>, ApiError> {
+    resolve_procedure_approval(&deployment, run_id, ApprovalResult::Rejected).await
+}
+
+async fn resolve_procedure_approval(
+    deployment: &DeploymentImpl,
+    run_id: Uuid,
+    result: ApprovalResult,
+) -> Result<ResponseJson<ApiResponse<ProcedureRun>>, ApiError> {
+    let run = ProcedureRun::find_by_id(&deployment.db().pool, run_id)
+        .await?
+        .ok_or_else(|| ApiError::BadRequest(format!("procedure run `{run_id}` not found")))?;
+    if run.status != ProcedureRunStatus::AwaitingApproval.as_str() {
+        return Err(ApiError::BadRequest(format!(
+            "procedure run `{run_id}` is not awaiting approval (status={})",
+            run.status
+        )));
+    }
+    let delivered = procedure_runtime::approvals().signal(run_id, result).await;
+    if !delivered {
+        return Err(ApiError::BadRequest(format!(
+            "no live approval channel for run `{run_id}`"
+        )));
+    }
     Ok(ResponseJson(ApiResponse::success(run)))
 }
 
@@ -126,5 +168,13 @@ pub fn router() -> Router<DeploymentImpl> {
         .route(
             "/procedure-runs/{run_id}/cancel",
             post(cancel_procedure_run),
+        )
+        .route(
+            "/procedure-runs/{run_id}/approve",
+            post(approve_procedure_run),
+        )
+        .route(
+            "/procedure-runs/{run_id}/reject",
+            post(reject_procedure_run),
         )
 }

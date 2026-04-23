@@ -35,6 +35,7 @@ pub struct GateContext<'a> {
     pub run: Option<String>,
     pub pass_when: &'a str,
     pub prompt: Option<String>,
+    pub last_assistant_message: Option<&'a str>,
 }
 
 pub struct DeterministicGateEvaluator;
@@ -116,6 +117,72 @@ impl<S: LlmJudgeSource> GateEvaluator for LlmJudgeGateEvaluator<S> {
             summary: format!("llm_judge pass_when=`{}`", ctx.pass_when),
         })
     }
+}
+
+/// Judge that parses the preceding action's `last_assistant_message` as JSON.
+/// Accepts either a clean JSON document or a JSON object embedded in prose
+/// (e.g. a reviewer's reply with commentary around the `{...}`).
+pub struct ContextLlmJudge;
+
+#[async_trait]
+impl GateEvaluator for ContextLlmJudge {
+    async fn evaluate(&self, ctx: &GateContext) -> Result<GateOutcome, GateError> {
+        let raw = ctx
+            .last_assistant_message
+            .ok_or(GateError::MissingResponse)?;
+        let response = extract_json_object(raw).ok_or_else(|| {
+            GateError::UnsupportedExpression(format!(
+                "llm_judge: reviewer output is not parseable JSON: {raw}"
+            ))
+        })?;
+        let passed = evaluate_llm_expr(ctx.pass_when, &response)?;
+        Ok(GateOutcome {
+            passed,
+            output: Some(raw.to_string()),
+            response: Some(response),
+            summary: format!("llm_judge pass_when=`{}`", ctx.pass_when),
+        })
+    }
+}
+
+fn extract_json_object(text: &str) -> Option<Value> {
+    let trimmed = text.trim();
+    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+        return Some(v);
+    }
+    let bytes = trimmed.as_bytes();
+    let start = bytes.iter().position(|&b| b == b'{')?;
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, &b) in bytes.iter().enumerate().skip(start) {
+        if escape {
+            escape = false;
+            continue;
+        }
+        if in_string {
+            match b {
+                b'\\' => escape = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0
+                    && let Ok(v) = serde_json::from_str::<Value>(&trimmed[start..=i])
+                {
+                    return Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn evaluate_llm_expr(expr: &str, response: &Value) -> Result<bool, GateError> {
@@ -260,6 +327,7 @@ mod tests {
             run: Some("echo hello".to_string()),
             pass_when: "exit_code == 0",
             prompt: None,
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(outcome.passed);
@@ -273,6 +341,7 @@ mod tests {
             run: Some("exit 3".to_string()),
             pass_when: "exit_code == 0",
             prompt: None,
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(!outcome.passed);
@@ -285,6 +354,7 @@ mod tests {
             run: Some("exit 7".to_string()),
             pass_when: "exit_code == 7",
             prompt: None,
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(outcome.passed);
@@ -298,6 +368,7 @@ mod tests {
             run: None,
             pass_when: "response.verdict == 'pass'",
             prompt: None,
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(outcome.passed);
@@ -311,6 +382,7 @@ mod tests {
             run: None,
             pass_when: "response.verdict == 'pass'",
             prompt: None,
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(!outcome.passed);
@@ -324,6 +396,7 @@ mod tests {
             run: None,
             pass_when: "response.review.status == 'ok'",
             prompt: None,
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(outcome.passed);
@@ -336,6 +409,7 @@ mod tests {
             run: None,
             pass_when: "",
             prompt: Some("approve?".to_string()),
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(outcome.passed);
@@ -348,9 +422,72 @@ mod tests {
             run: None,
             pass_when: "",
             prompt: Some("approve?".to_string()),
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(!outcome.passed);
+    }
+
+    #[tokio::test]
+    async fn context_judge_parses_direct_json_and_passes() {
+        let gate = ContextLlmJudge;
+        let raw = r#"{"verdict": "pass", "feedback": "lgtm"}"#;
+        let ctx = GateContext {
+            run: None,
+            pass_when: "response.verdict == 'pass'",
+            prompt: None,
+            last_assistant_message: Some(raw),
+        };
+        let outcome = gate.evaluate(&ctx).await.unwrap();
+        assert!(outcome.passed);
+        assert_eq!(
+            outcome.response.unwrap().get("feedback").unwrap(),
+            &json!("lgtm")
+        );
+    }
+
+    #[tokio::test]
+    async fn context_judge_extracts_json_embedded_in_prose() {
+        let gate = ContextLlmJudge;
+        let raw = "Here is my review.\n\n```json\n{\"verdict\": \"fail\", \"feedback\": \"tests missing\"}\n```\nHope that helps.";
+        let ctx = GateContext {
+            run: None,
+            pass_when: "response.verdict == 'pass'",
+            prompt: None,
+            last_assistant_message: Some(raw),
+        };
+        let outcome = gate.evaluate(&ctx).await.unwrap();
+        assert!(!outcome.passed);
+        assert_eq!(
+            outcome.response.unwrap().get("verdict").unwrap(),
+            &json!("fail")
+        );
+    }
+
+    #[tokio::test]
+    async fn context_judge_errors_when_no_message() {
+        let gate = ContextLlmJudge;
+        let ctx = GateContext {
+            run: None,
+            pass_when: "response.verdict == 'pass'",
+            prompt: None,
+            last_assistant_message: None,
+        };
+        let err = gate.evaluate(&ctx).await.unwrap_err();
+        assert!(matches!(err, GateError::MissingResponse));
+    }
+
+    #[tokio::test]
+    async fn context_judge_errors_when_no_json_present() {
+        let gate = ContextLlmJudge;
+        let ctx = GateContext {
+            run: None,
+            pass_when: "response.verdict == 'pass'",
+            prompt: None,
+            last_assistant_message: Some("I reviewed it and it looks fine."),
+        };
+        let err = gate.evaluate(&ctx).await.unwrap_err();
+        assert!(matches!(err, GateError::UnsupportedExpression(_)));
     }
 
     #[tokio::test]
@@ -362,6 +499,7 @@ mod tests {
             run: None,
             pass_when: "",
             prompt: Some("approve?".to_string()),
+            last_assistant_message: None,
         };
         let outcome = gate.evaluate(&ctx).await.unwrap();
         assert!(outcome.passed);

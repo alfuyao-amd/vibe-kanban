@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[ts(rename_all = "snake_case")]
 pub enum ProcedureRunStatus {
     Running,
+    AwaitingApproval,
     Succeeded,
     Failed,
     Cancelled,
@@ -18,6 +19,7 @@ impl ProcedureRunStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Running => "running",
+            Self::AwaitingApproval => "awaiting_approval",
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -62,6 +64,7 @@ pub struct ProcedureRun {
     #[ts(type = "Array<StateHistoryEntry>")]
     pub state_history: sqlx::types::Json<Vec<StateHistoryEntry>>,
     pub workspace_id: Option<Uuid>,
+    pub pending_approval_prompt: Option<String>,
     #[ts(type = "Date")]
     pub created_at: DateTime<Utc>,
     #[ts(type = "Date")]
@@ -81,7 +84,8 @@ pub struct CreateProcedureRun {
 impl ProcedureRun {
     const COLUMNS: &'static str = "id, project_id, procedure_name, procedure_version, \
                                    current_state, status, params, state_history, \
-                                   workspace_id, created_at, updated_at";
+                                   workspace_id, pending_approval_prompt, \
+                                   created_at, updated_at";
 
     pub async fn create(
         pool: &SqlitePool,
@@ -166,13 +170,54 @@ impl ProcedureRun {
     pub async fn cancel(pool: &SqlitePool, id: Uuid) -> Result<Option<Self>, sqlx::Error> {
         let query = format!(
             r#"UPDATE procedure_runs
-               SET status = ?, updated_at = datetime('now', 'subsec')
-               WHERE id = ? AND status = 'running'
+               SET status = ?, pending_approval_prompt = NULL,
+                   updated_at = datetime('now', 'subsec')
+               WHERE id = ? AND status IN ('running', 'awaiting_approval')
                RETURNING {cols}"#,
             cols = Self::COLUMNS
         );
         sqlx::query_as::<_, Self>(&query)
             .bind(ProcedureRunStatus::Cancelled.as_str())
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+    }
+
+    pub async fn set_awaiting_approval(
+        pool: &SqlitePool,
+        id: Uuid,
+        prompt: &str,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        let query = format!(
+            r#"UPDATE procedure_runs
+               SET status = ?, pending_approval_prompt = ?,
+                   updated_at = datetime('now', 'subsec')
+               WHERE id = ? AND status = 'running'
+               RETURNING {cols}"#,
+            cols = Self::COLUMNS
+        );
+        sqlx::query_as::<_, Self>(&query)
+            .bind(ProcedureRunStatus::AwaitingApproval.as_str())
+            .bind(prompt)
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+    }
+
+    pub async fn clear_awaiting_approval(
+        pool: &SqlitePool,
+        id: Uuid,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        let query = format!(
+            r#"UPDATE procedure_runs
+               SET status = ?, pending_approval_prompt = NULL,
+                   updated_at = datetime('now', 'subsec')
+               WHERE id = ? AND status = 'awaiting_approval'
+               RETURNING {cols}"#,
+            cols = Self::COLUMNS
+        );
+        sqlx::query_as::<_, Self>(&query)
+            .bind(ProcedureRunStatus::Running.as_str())
             .bind(id)
             .fetch_optional(pool)
             .await

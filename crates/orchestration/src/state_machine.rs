@@ -364,7 +364,8 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
                         .backend
                         .follow_up(session.clone(), executor.as_deref(), &prompt)
                         .await?;
-                    let _ = self.backend.await_completion(execution.clone()).await?;
+                    let output = self.backend.await_completion(execution.clone()).await?;
+                    context.last_action_output = Some(output);
                     action_event = Some(StateEvent::ActionCompleted {
                         action_kind: "follow_up".to_string(),
                         session_id: Some(session.0),
@@ -385,7 +386,8 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
                         .backend
                         .start_review(session.clone(), &executor, &prompt)
                         .await?;
-                    let _ = self.backend.await_completion(execution.clone()).await?;
+                    let output = self.backend.await_completion(execution.clone()).await?;
+                    context.last_action_output = Some(output);
                     action_event = Some(StateEvent::ActionCompleted {
                         action_kind: "start_review".to_string(),
                         session_id: Some(session.0),
@@ -434,6 +436,10 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
         gate: &Gate,
         context: &RunContext,
     ) -> Result<GateOutcome, ExecutorError> {
+        let last_assistant_message = context
+            .last_action_output
+            .as_ref()
+            .and_then(|o| o.last_assistant_message.as_deref());
         match gate {
             Gate::Deterministic { run, pass_when } => {
                 let run_rendered = render_template(run, &context.view());
@@ -441,6 +447,7 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
                     run: Some(run_rendered),
                     pass_when,
                     prompt: None,
+                    last_assistant_message,
                 };
                 Ok(self.gates.deterministic.evaluate(&ctx).await?)
             }
@@ -449,6 +456,7 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
                     run: None,
                     pass_when,
                     prompt: None,
+                    last_assistant_message,
                 };
                 Ok(self.gates.llm_judge.evaluate(&ctx).await?)
             }
@@ -458,6 +466,7 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
                     run: None,
                     pass_when: "",
                     prompt: Some(prompt_rendered),
+                    last_assistant_message,
                 };
                 Ok(self.gates.human.evaluate(&ctx).await?)
             }
@@ -469,6 +478,7 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
 struct RunContext {
     initial: Value,
     sessions: HashMap<String, SessionId>,
+    last_action_output: Option<ExecutionOutput>,
     last_gate: Option<GateSnapshot>,
     gates_by_state: HashMap<String, GateSnapshot>,
 }
@@ -484,6 +494,7 @@ impl RunContext {
         Self {
             initial,
             sessions: HashMap::new(),
+            last_action_output: None,
             last_gate: None,
             gates_by_state: HashMap::new(),
         }
@@ -903,6 +914,144 @@ mod tests {
         let executor = ProcedureExecutor::new(MockBackend::default(), store, default_gates());
         let err = executor.run(&proc, json!({})).await.unwrap_err();
         assert!(matches!(err, ExecutorError::MaxAttemptsExhausted { .. }));
+    }
+
+    #[tokio::test]
+    async fn llm_judge_consumes_reviewer_output_and_feedback_flows_to_next_state() {
+        use std::sync::Mutex;
+
+        use crate::gates::ContextLlmJudge;
+
+        #[derive(Default)]
+        struct ScriptedBackend {
+            follow_up_prompts: Mutex<Vec<String>>,
+        }
+
+        #[async_trait]
+        impl ExecutionBackend for ScriptedBackend {
+            async fn create_session(
+                &self,
+                _executor: &str,
+                _prompt: &str,
+                _params: &Value,
+            ) -> Result<SessionId, BackendError> {
+                Ok(SessionId("s1".into()))
+            }
+            async fn follow_up(
+                &self,
+                _session_id: SessionId,
+                _executor: Option<&str>,
+                prompt: &str,
+            ) -> Result<ExecutionId, BackendError> {
+                self.follow_up_prompts.lock().unwrap().push(prompt.into());
+                Ok(ExecutionId("e-fu".into()))
+            }
+            async fn start_review(
+                &self,
+                _session_id: SessionId,
+                _executor: &str,
+                _prompt: &str,
+            ) -> Result<ExecutionId, BackendError> {
+                Ok(ExecutionId("e-rv".into()))
+            }
+            async fn merge(&self, _session_id: SessionId) -> Result<MergeOutcome, BackendError> {
+                Ok(MergeOutcome::Merged {
+                    commit_sha: "abc".into(),
+                })
+            }
+            async fn await_completion(
+                &self,
+                execution_id: ExecutionId,
+            ) -> Result<ExecutionOutput, BackendError> {
+                let msg = match execution_id.0.as_str() {
+                    "e-rv" => Some(r#"{"verdict": "fail", "feedback": "needs tests"}"#.into()),
+                    _ => None,
+                };
+                Ok(ExecutionOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: Some(0),
+                    last_assistant_message: msg,
+                })
+            }
+        }
+
+        let mut states = IndexMap::new();
+        states.insert(
+            "plan".into(),
+            State {
+                action: Some(Action::CreateSession {
+                    executor: "c".into(),
+                    prompt: "p".into(),
+                }),
+                on_success: Some("review".into()),
+                ..Default::default()
+            },
+        );
+        states.insert(
+            "review".into(),
+            State {
+                action: Some(Action::StartReview {
+                    session_ref: "plan".into(),
+                    executor: "c".into(),
+                    prompt: "review".into(),
+                }),
+                gate: Some(Gate::LlmJudge {
+                    pass_when: "response.verdict == 'pass'".into(),
+                }),
+                on_success: Some("merge".into()),
+                on_failure: Some("address".into()),
+                ..Default::default()
+            },
+        );
+        states.insert(
+            "address".into(),
+            State {
+                action: Some(Action::FollowUp {
+                    session_ref: "plan".into(),
+                    executor: None,
+                    prompt: "fix: {{gate.response.feedback}}".into(),
+                }),
+                on_success: Some("done".into()),
+                ..Default::default()
+            },
+        );
+        states.insert(
+            "merge".into(),
+            State {
+                terminal: Some(Terminal::Success),
+                ..Default::default()
+            },
+        );
+        states.insert(
+            "done".into(),
+            State {
+                terminal: Some(Terminal::Success),
+                ..Default::default()
+            },
+        );
+        let proc = Procedure {
+            name: "t".into(),
+            version: 1,
+            description: String::new(),
+            triggers: Default::default(),
+            initial_state: "plan".into(),
+            states,
+        };
+        let gates = GateEvaluators {
+            deterministic: Box::new(DeterministicGateEvaluator),
+            llm_judge: Box::new(ContextLlmJudge),
+            human: Box::new(HumanGateEvaluator::new(AutoApprove(
+                ApprovalResult::Approved,
+            ))),
+        };
+        let backend = ScriptedBackend::default();
+        let executor = ProcedureExecutor::new(backend, InMemoryRunStore::new(), gates);
+        let outcome = executor.run(&proc, json!({})).await.unwrap();
+        assert_eq!(outcome, RunOutcome::Success);
+        let prompts = executor.backend.follow_up_prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 1);
+        assert_eq!(prompts[0], "fix: needs tests");
     }
 
     #[test]
