@@ -14,6 +14,10 @@ triggers:
       type: string
       required: true
       description: One-sentence description of the feature to build.
+    test_command:
+      type: string
+      required: true
+      description: Shell command that runs the project's tests (e.g. "npm test" or "node hello.test.js"). Must exit 0 on success.
     target_files:
       type: array
       items: string
@@ -42,7 +46,7 @@ states:
         Implement the plan. Write code AND tests. Keep the diff minimal.
     gate:
       kind: deterministic
-      run: "{{project.dev_script}}"
+      run: "{{test_command}}"
       pass_when: "exit_code == 0"
     on_success: review
     on_failure: implement_retry
@@ -59,7 +63,7 @@ states:
     max_attempts: 2
     gate:
       kind: deterministic
-      run: "{{project.dev_script}}"
+      run: "{{test_command}}"
       pass_when: "exit_code == 0"
     on_success: review
     on_failure: failed

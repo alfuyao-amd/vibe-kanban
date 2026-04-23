@@ -917,6 +917,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn feature_with_tests_reaches_success_under_stub_runtime() {
+        use crate::{
+            gates::{ContextLlmJudge, DeterministicGateEvaluator},
+            loader::builtin_procedures,
+        };
+
+        #[derive(Default)]
+        struct StubBackend;
+
+        #[async_trait]
+        impl ExecutionBackend for StubBackend {
+            async fn create_session(
+                &self,
+                _executor: &str,
+                _prompt: &str,
+                _params: &Value,
+            ) -> Result<SessionId, BackendError> {
+                Ok(SessionId(Uuid::new_v4().to_string()))
+            }
+            async fn follow_up(
+                &self,
+                _session_id: SessionId,
+                _executor: Option<&str>,
+                _prompt: &str,
+            ) -> Result<ExecutionId, BackendError> {
+                Ok(ExecutionId(Uuid::new_v4().to_string()))
+            }
+            async fn start_review(
+                &self,
+                _session_id: SessionId,
+                _executor: &str,
+                _prompt: &str,
+            ) -> Result<ExecutionId, BackendError> {
+                Ok(ExecutionId(Uuid::new_v4().to_string()))
+            }
+            async fn merge(&self, _session_id: SessionId) -> Result<MergeOutcome, BackendError> {
+                Ok(MergeOutcome::Merged {
+                    commit_sha: "stub".into(),
+                })
+            }
+            async fn await_completion(
+                &self,
+                _execution_id: ExecutionId,
+            ) -> Result<ExecutionOutput, BackendError> {
+                Ok(ExecutionOutput {
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: Some(0),
+                    last_assistant_message: Some(
+                        r#"{"verdict":"pass","feedback":"ok"}"#.to_string(),
+                    ),
+                })
+            }
+        }
+
+        let procs = builtin_procedures().expect("builtins parse");
+        let feature = procs
+            .into_iter()
+            .find(|p| p.name == "feature_with_tests")
+            .expect("feature_with_tests exists");
+        let gates = GateEvaluators {
+            deterministic: Box::new(DeterministicGateEvaluator),
+            llm_judge: Box::new(ContextLlmJudge),
+            human: Box::new(crate::gates::HumanGateEvaluator::new(
+                crate::gates::AutoApprove(crate::gates::ApprovalResult::Approved),
+            )),
+        };
+        let executor = ProcedureExecutor::new(StubBackend, InMemoryRunStore::new(), gates);
+        let outcome = executor
+            .run(
+                &feature,
+                json!({
+                    "goal": "add shout(text)",
+                    "test_command": "true",
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, RunOutcome::Success);
+    }
+
+    #[tokio::test]
     async fn llm_judge_consumes_reviewer_output_and_feedback_flows_to_next_state() {
         use std::sync::Mutex;
 
