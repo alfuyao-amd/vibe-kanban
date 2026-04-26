@@ -100,6 +100,9 @@ import {
   OpenRemoteWorkspaceInEditorRequest,
   OpenRemoteEditorResponse,
   ProfileResponse,
+  ProcedureRun,
+  ProcedureSummary,
+  StartProcedureRequest,
 } from 'shared/types';
 import type { Project as RemoteProject } from 'shared/remote-types';
 import type { WorkspaceWithSession } from '@/shared/types/attempt';
@@ -1053,6 +1056,68 @@ export const tagsApi = {
       method: 'DELETE',
     });
     return handleApiResponse<void>(response);
+  },
+};
+
+export const proceduresApi = {
+  listDefinitions: async (): Promise<ProcedureSummary[]> => {
+    const response = await makeRequest('/api/procedures');
+    return handleApiResponse<ProcedureSummary[]>(response);
+  },
+
+  listAllRuns: async (): Promise<ProcedureRun[]> => {
+    const response = await makeRequest('/api/procedure-runs');
+    return handleApiResponse<ProcedureRun[]>(response);
+  },
+
+  listRunsForProject: async (projectId: string): Promise<ProcedureRun[]> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/procedure-runs`
+    );
+    return handleApiResponse<ProcedureRun[]>(response);
+  },
+
+  getRun: async (runId: string): Promise<ProcedureRun> => {
+    const response = await makeRequest(`/api/procedure-runs/${runId}`);
+    return handleApiResponse<ProcedureRun>(response);
+  },
+
+  startRun: async (
+    projectId: string,
+    body: StartProcedureRequest
+  ): Promise<ProcedureRun> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/procedure-runs`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+    return handleApiResponse<ProcedureRun>(response);
+  },
+
+  approve: async (runId: string): Promise<ProcedureRun> => {
+    const response = await makeRequest(
+      `/api/procedure-runs/${runId}/approve`,
+      { method: 'POST' }
+    );
+    return handleApiResponse<ProcedureRun>(response);
+  },
+
+  reject: async (runId: string): Promise<ProcedureRun> => {
+    const response = await makeRequest(
+      `/api/procedure-runs/${runId}/reject`,
+      { method: 'POST' }
+    );
+    return handleApiResponse<ProcedureRun>(response);
+  },
+
+  cancel: async (runId: string): Promise<ProcedureRun> => {
+    const response = await makeRequest(
+      `/api/procedure-runs/${runId}/cancel`,
+      { method: 'POST' }
+    );
+    return handleApiResponse<ProcedureRun>(response);
   },
 };
 

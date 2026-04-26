@@ -148,6 +148,16 @@ impl ProcedureRun {
             .await
     }
 
+    pub async fn list_all(pool: &SqlitePool) -> Result<Vec<Self>, sqlx::Error> {
+        let query = format!(
+            r#"SELECT {cols}
+               FROM procedure_runs
+               ORDER BY created_at DESC"#,
+            cols = Self::COLUMNS
+        );
+        sqlx::query_as::<_, Self>(&query).fetch_all(pool).await
+    }
+
     pub async fn update_status(
         pool: &SqlitePool,
         id: Uuid,

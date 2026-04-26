@@ -14,6 +14,7 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as OnboardingSignInRouteImport } from './routes/onboarding_.sign-in'
 import { Route as AppWorkspacesRouteImport } from './routes/_app.workspaces'
+import { Route as AppProcedureRunsRouteImport } from './routes/_app.procedure-runs'
 import { Route as AppNotificationsRouteImport } from './routes/_app.notifications'
 import { Route as AppExportRouteImport } from './routes/_app.export'
 import { Route as WorkspacesWorkspaceIdVscodeRouteImport } from './routes/workspaces.$workspaceId.vscode'
@@ -21,6 +22,7 @@ import { Route as AppWorkspacesElectricTestRouteImport } from './routes/_app.wor
 import { Route as AppWorkspacesCreateRouteImport } from './routes/_app.workspaces_.create'
 import { Route as AppWorkspacesWorkspaceIdRouteImport } from './routes/_app.workspaces_.$workspaceId'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app.projects.$projectId'
+import { Route as AppProcedureRunsRunIdRouteImport } from './routes/_app.procedure-runs_.$runId'
 import { Route as AppHostsHostIdWorkspacesRouteImport } from './routes/_app.hosts.$hostId.workspaces'
 import { Route as HostsHostIdWorkspacesWorkspaceIdVscodeRouteImport } from './routes/hosts.$hostId.workspaces.$workspaceId.vscode'
 import { Route as AppProjectsProjectIdIssuesIssueIdRouteImport } from './routes/_app.projects.$projectId_.issues.$issueId'
@@ -55,6 +57,11 @@ const OnboardingSignInRoute = OnboardingSignInRouteImport.update({
 const AppWorkspacesRoute = AppWorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProcedureRunsRoute = AppProcedureRunsRouteImport.update({
+  id: '/procedure-runs',
+  path: '/procedure-runs',
   getParentRoute: () => AppRoute,
 } as any)
 const AppNotificationsRoute = AppNotificationsRouteImport.update({
@@ -93,6 +100,11 @@ const AppWorkspacesWorkspaceIdRoute =
 const AppProjectsProjectIdRoute = AppProjectsProjectIdRouteImport.update({
   id: '/projects/$projectId',
   path: '/projects/$projectId',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProcedureRunsRunIdRoute = AppProcedureRunsRunIdRouteImport.update({
+  id: '/procedure-runs_/$runId',
+  path: '/procedure-runs/$runId',
   getParentRoute: () => AppRoute,
 } as any)
 const AppHostsHostIdWorkspacesRoute =
@@ -171,8 +183,10 @@ export interface FileRoutesByFullPath {
   '/onboarding': typeof OnboardingRoute
   '/export': typeof AppExportRoute
   '/notifications': typeof AppNotificationsRoute
+  '/procedure-runs': typeof AppProcedureRunsRoute
   '/workspaces': typeof AppWorkspacesRoute
   '/onboarding/sign-in': typeof OnboardingSignInRoute
+  '/procedure-runs/$runId': typeof AppProcedureRunsRunIdRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRoute
   '/workspaces/$workspaceId': typeof AppWorkspacesWorkspaceIdRoute
   '/workspaces/create': typeof AppWorkspacesCreateRoute
@@ -195,8 +209,10 @@ export interface FileRoutesByTo {
   '/onboarding': typeof OnboardingRoute
   '/export': typeof AppExportRoute
   '/notifications': typeof AppNotificationsRoute
+  '/procedure-runs': typeof AppProcedureRunsRoute
   '/workspaces': typeof AppWorkspacesRoute
   '/onboarding/sign-in': typeof OnboardingSignInRoute
+  '/procedure-runs/$runId': typeof AppProcedureRunsRunIdRoute
   '/projects/$projectId': typeof AppProjectsProjectIdRoute
   '/workspaces/$workspaceId': typeof AppWorkspacesWorkspaceIdRoute
   '/workspaces/create': typeof AppWorkspacesCreateRoute
@@ -221,8 +237,10 @@ export interface FileRoutesById {
   '/onboarding': typeof OnboardingRoute
   '/_app/export': typeof AppExportRoute
   '/_app/notifications': typeof AppNotificationsRoute
+  '/_app/procedure-runs': typeof AppProcedureRunsRoute
   '/_app/workspaces': typeof AppWorkspacesRoute
   '/onboarding_/sign-in': typeof OnboardingSignInRoute
+  '/_app/procedure-runs_/$runId': typeof AppProcedureRunsRunIdRoute
   '/_app/projects/$projectId': typeof AppProjectsProjectIdRoute
   '/_app/workspaces_/$workspaceId': typeof AppWorkspacesWorkspaceIdRoute
   '/_app/workspaces_/create': typeof AppWorkspacesCreateRoute
@@ -247,8 +265,10 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/export'
     | '/notifications'
+    | '/procedure-runs'
     | '/workspaces'
     | '/onboarding/sign-in'
+    | '/procedure-runs/$runId'
     | '/projects/$projectId'
     | '/workspaces/$workspaceId'
     | '/workspaces/create'
@@ -271,8 +291,10 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/export'
     | '/notifications'
+    | '/procedure-runs'
     | '/workspaces'
     | '/onboarding/sign-in'
+    | '/procedure-runs/$runId'
     | '/projects/$projectId'
     | '/workspaces/$workspaceId'
     | '/workspaces/create'
@@ -296,8 +318,10 @@ export interface FileRouteTypes {
     | '/onboarding'
     | '/_app/export'
     | '/_app/notifications'
+    | '/_app/procedure-runs'
     | '/_app/workspaces'
     | '/onboarding_/sign-in'
+    | '/_app/procedure-runs_/$runId'
     | '/_app/projects/$projectId'
     | '/_app/workspaces_/$workspaceId'
     | '/_app/workspaces_/create'
@@ -362,6 +386,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppWorkspacesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/procedure-runs': {
+      id: '/_app/procedure-runs'
+      path: '/procedure-runs'
+      fullPath: '/procedure-runs'
+      preLoaderRoute: typeof AppProcedureRunsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/notifications': {
       id: '/_app/notifications'
       path: '/notifications'
@@ -409,6 +440,13 @@ declare module '@tanstack/react-router' {
       path: '/projects/$projectId'
       fullPath: '/projects/$projectId'
       preLoaderRoute: typeof AppProjectsProjectIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/procedure-runs_/$runId': {
+      id: '/_app/procedure-runs_/$runId'
+      path: '/procedure-runs/$runId'
+      fullPath: '/procedure-runs/$runId'
+      preLoaderRoute: typeof AppProcedureRunsRunIdRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/hosts/$hostId/workspaces': {
@@ -494,7 +532,9 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppExportRoute: typeof AppExportRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
+  AppProcedureRunsRoute: typeof AppProcedureRunsRoute
   AppWorkspacesRoute: typeof AppWorkspacesRoute
+  AppProcedureRunsRunIdRoute: typeof AppProcedureRunsRunIdRoute
   AppProjectsProjectIdRoute: typeof AppProjectsProjectIdRoute
   AppWorkspacesWorkspaceIdRoute: typeof AppWorkspacesWorkspaceIdRoute
   AppWorkspacesCreateRoute: typeof AppWorkspacesCreateRoute
@@ -514,7 +554,9 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppExportRoute: AppExportRoute,
   AppNotificationsRoute: AppNotificationsRoute,
+  AppProcedureRunsRoute: AppProcedureRunsRoute,
   AppWorkspacesRoute: AppWorkspacesRoute,
+  AppProcedureRunsRunIdRoute: AppProcedureRunsRunIdRoute,
   AppProjectsProjectIdRoute: AppProjectsProjectIdRoute,
   AppWorkspacesWorkspaceIdRoute: AppWorkspacesWorkspaceIdRoute,
   AppWorkspacesCreateRoute: AppWorkspacesCreateRoute,

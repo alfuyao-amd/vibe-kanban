@@ -174,6 +174,13 @@ pub async fn list_procedure_runs_for_project(
     Ok(ResponseJson(ApiResponse::success(runs)))
 }
 
+pub async fn list_all_procedure_runs(
+    State(deployment): State<DeploymentImpl>,
+) -> Result<ResponseJson<ApiResponse<Vec<ProcedureRun>>>, ApiError> {
+    let runs = ProcedureRun::list_all(&deployment.db().pool).await?;
+    Ok(ResponseJson(ApiResponse::success(runs)))
+}
+
 pub async fn get_procedure_run(
     State(deployment): State<DeploymentImpl>,
     Path(run_id): Path<Uuid>,
@@ -247,6 +254,7 @@ pub fn router() -> Router<DeploymentImpl> {
             "/projects/{project_id}/procedure-runs",
             get(list_procedure_runs_for_project).post(start_procedure_run),
         )
+        .route("/procedure-runs", get(list_all_procedure_runs))
         .route("/procedure-runs/{run_id}", get(get_procedure_run))
         .route(
             "/procedure-runs/{run_id}/cancel",
