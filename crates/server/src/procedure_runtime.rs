@@ -285,6 +285,11 @@ struct ExecProcView {
     exit_code: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct LastAssistantMessageView {
+    message: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct CreateSessionBody<'a> {
     workspace_id: Uuid,
@@ -576,11 +581,12 @@ impl ExecutionBackend for VkApiBackend {
             match proc.status.as_str() {
                 "running" => tokio::time::sleep(self.poll_interval).await,
                 "completed" => {
+                    let last_assistant_message = self.fetch_last_assistant_message(&eid).await;
                     return Ok(ExecutionOutput {
                         stdout: String::new(),
                         stderr: String::new(),
                         exit_code: proc.exit_code.map(|c| c as i32),
-                        last_assistant_message: None,
+                        last_assistant_message,
                     });
                 }
                 other => {
@@ -588,6 +594,26 @@ impl ExecutionBackend for VkApiBackend {
                         "execution {eid} ended with status `{other}`"
                     )));
                 }
+            }
+        }
+    }
+}
+
+impl VkApiBackend {
+    async fn fetch_last_assistant_message(&self, execution_id: &Uuid) -> Option<String> {
+        let url = self.url(&format!(
+            "/api/execution-processes/{execution_id}/last-assistant-message"
+        ));
+        match self.client.get(&url).send().await {
+            Ok(resp) => {
+                Self::unwrap_envelope::<LastAssistantMessageView>(resp, &format!("GET {url}"))
+                    .await
+                    .ok()
+                    .and_then(|v| v.message)
+            }
+            Err(err) => {
+                tracing::warn!(%execution_id, %err, "failed to fetch last_assistant_message");
+                None
             }
         }
     }
@@ -916,6 +942,78 @@ mod tests {
                 .await
                 .expect_err("failed status should error");
             assert!(err.to_string().contains("failed"));
+        }
+
+        #[tokio::test]
+        async fn await_completion_fetches_last_assistant_message_when_completed() {
+            let server = MockServer::start().await;
+            let exec_uuid = Uuid::new_v4();
+
+            Mock::given(method("GET"))
+                .and(path(format!("/api/execution-processes/{exec_uuid}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(envelope(json!({
+                    "id": exec_uuid,
+                    "status": "completed",
+                    "exit_code": 0
+                }))))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            Mock::given(method("GET"))
+                .and(path(format!(
+                    "/api/execution-processes/{exec_uuid}/last-assistant-message"
+                )))
+                .respond_with(ResponseTemplate::new(200).set_body_json(envelope(json!({
+                    "message": "{\"verdict\":\"pass\"}"
+                }))))
+                .expect(1)
+                .mount(&server)
+                .await;
+
+            let backend =
+                VkApiBackend::new(server.uri()).with_poll_interval(Duration::from_millis(1));
+            let output = backend
+                .await_completion(ExecutionId(exec_uuid.to_string()))
+                .await
+                .expect("await_completion succeeds");
+            assert_eq!(output.exit_code, Some(0));
+            assert_eq!(
+                output.last_assistant_message.as_deref(),
+                Some("{\"verdict\":\"pass\"}")
+            );
+        }
+
+        #[tokio::test]
+        async fn await_completion_tolerates_missing_last_assistant_message() {
+            let server = MockServer::start().await;
+            let exec_uuid = Uuid::new_v4();
+
+            Mock::given(method("GET"))
+                .and(path(format!("/api/execution-processes/{exec_uuid}")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(envelope(json!({
+                    "id": exec_uuid,
+                    "status": "completed",
+                    "exit_code": 0
+                }))))
+                .mount(&server)
+                .await;
+
+            Mock::given(method("GET"))
+                .and(path(format!(
+                    "/api/execution-processes/{exec_uuid}/last-assistant-message"
+                )))
+                .respond_with(ResponseTemplate::new(404))
+                .mount(&server)
+                .await;
+
+            let backend =
+                VkApiBackend::new(server.uri()).with_poll_interval(Duration::from_millis(1));
+            let output = backend
+                .await_completion(ExecutionId(exec_uuid.to_string()))
+                .await
+                .expect("await_completion succeeds even without summary");
+            assert_eq!(output.last_assistant_message, None);
         }
 
         #[tokio::test]

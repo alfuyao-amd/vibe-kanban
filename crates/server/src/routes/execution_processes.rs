@@ -7,13 +7,15 @@ use axum::{
     routing::{get, post},
 };
 use db::models::{
+    coding_agent_turn::CodingAgentTurn,
     execution_process::{ExecutionProcess, ExecutionProcessStatus},
     execution_process_repo_state::ExecutionProcessRepoState,
 };
 use deployment::Deployment;
 use futures_util::{StreamExt, TryStreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use services::services::container::ContainerService;
+use ts_rs::TS;
 use utils::{log_msg::LogMsg, response::ApiResponse};
 use uuid::Uuid;
 
@@ -273,6 +275,25 @@ async fn handle_execution_processes_by_session_ws(
     Ok(())
 }
 
+#[derive(Debug, Serialize, TS)]
+pub struct ExecutionLastAssistantMessage {
+    pub message: Option<String>,
+}
+
+async fn get_execution_process_last_assistant_message(
+    Extension(execution_process): Extension<ExecutionProcess>,
+    State(deployment): State<DeploymentImpl>,
+) -> Result<ResponseJson<ApiResponse<ExecutionLastAssistantMessage>>, ApiError> {
+    let turn =
+        CodingAgentTurn::find_by_execution_process_id(&deployment.db().pool, execution_process.id)
+            .await?;
+    Ok(ResponseJson(ApiResponse::success(
+        ExecutionLastAssistantMessage {
+            message: turn.and_then(|t| t.summary),
+        },
+    )))
+}
+
 async fn get_execution_process_repo_states(
     Extension(execution_process): Extension<ExecutionProcess>,
     State(deployment): State<DeploymentImpl>,
@@ -288,6 +309,10 @@ pub(super) fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .route("/", get(get_execution_process_by_id))
         .route("/stop", post(stop_execution_process))
         .route("/repo-states", get(get_execution_process_repo_states))
+        .route(
+            "/last-assistant-message",
+            get(get_execution_process_last_assistant_message),
+        )
         .route("/raw-logs/ws", get(stream_raw_logs_ws))
         .route("/normalized-logs/ws", get(stream_normalized_logs_ws))
         .layer(from_fn_with_state(

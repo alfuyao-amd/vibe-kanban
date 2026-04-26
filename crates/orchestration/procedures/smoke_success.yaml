@@ -34,7 +34,10 @@ states:
       kind: start_review
       session_ref: plan
       executor: CLAUDE_CODE
-      prompt: "Review."
+      prompt: |
+        Smoke-test review. Respond with a JSON object somewhere in your reply
+        of the form: {"verdict": "pass", "feedback": "ok"}.
+        For this smoke procedure always emit verdict=pass.
     gate:
       kind: llm_judge
       pass_when: "response.verdict == 'pass'"
