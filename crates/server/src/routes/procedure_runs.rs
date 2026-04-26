@@ -4,10 +4,15 @@ use axum::{
     response::Json as ResponseJson,
     routing::{get, post},
 };
-use db::models::procedure_run::{CreateProcedureRun, ProcedureRun, ProcedureRunStatus};
+use db::models::{
+    procedure_run::{CreateProcedureRun, ProcedureRun, ProcedureRunStatus},
+    workspace::Workspace,
+    workspace_repo::WorkspaceRepo,
+};
 use deployment::Deployment;
 use orchestration::{Procedure, gates::ApprovalResult};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use ts_rs::TS;
 use utils::response::ApiResponse;
 use uuid::Uuid;
@@ -63,24 +68,102 @@ pub async fn start_procedure_run(
             ApiError::BadRequest(format!("unknown procedure `{}`", req.procedure_name))
         })?;
 
+    let params =
+        enrich_params_with_workspace(req.params.clone(), &deployment, req.workspace_id).await;
+
     let data = CreateProcedureRun {
         procedure_name: procedure.name.clone(),
         procedure_version: procedure.version as i64,
         initial_state: procedure.initial_state.clone(),
-        params: req.params.clone(),
+        params: params.clone(),
         workspace_id: req.workspace_id,
     };
 
     let run = ProcedureRun::create(&deployment.db().pool, project_id, &data).await?;
 
-    procedure_runtime::spawn_procedure_run(
-        deployment.db().pool.clone(),
-        run.id,
-        procedure,
-        req.params,
-    );
+    procedure_runtime::spawn_procedure_run(deployment.db().pool.clone(), run.id, procedure, params);
 
     Ok(ResponseJson(ApiResponse::success(run)))
+}
+
+/// Resolve the workspace's worktree path and inject it into params under
+/// `workspace.worktree_path` so YAML procedures can template
+/// `{{workspace.worktree_path}}` (e.g. `cd {{workspace.worktree_path}} && {{test_command}}`).
+/// Falls back silently if the workspace can't be found or has no worktree yet.
+async fn enrich_params_with_workspace(
+    params: Value,
+    deployment: &DeploymentImpl,
+    explicit_workspace_id: Option<Uuid>,
+) -> Value {
+    let workspace_id = explicit_workspace_id.or_else(|| {
+        params
+            .get("workspace_id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok())
+    });
+    let Some(workspace_id) = workspace_id else {
+        return params;
+    };
+    let workspace = match Workspace::find_by_id(&deployment.db().pool, workspace_id).await {
+        Ok(Some(ws)) => ws,
+        _ => return params,
+    };
+    let mut obj = match params {
+        Value::Object(map) => map,
+        other => {
+            let mut m = serde_json::Map::new();
+            if !matches!(other, Value::Null) {
+                m.insert("value".to_string(), other);
+            }
+            m
+        }
+    };
+    let workspace_root = workspace.container_ref.unwrap_or_default();
+
+    // VK lays out attached repos as `<worktree_root>/<repo.name>`. For the
+    // common single-repo case we point `workspace.worktree_path` at that
+    // subdir so YAML templates can `cd {{workspace.worktree_path}} && {{cmd}}`
+    // without knowing about the layout. The full root is also exposed as
+    // `workspace.workspace_path` for procedures that need it.
+    let repos = WorkspaceRepo::find_repos_for_workspace(&deployment.db().pool, workspace.id)
+        .await
+        .unwrap_or_default();
+    let primary_repo_path = match repos.as_slice() {
+        [single] if !workspace_root.is_empty() => format!("{workspace_root}/{}", single.name),
+        _ => workspace_root.clone(),
+    };
+
+    let repos_json: Vec<Value> = repos
+        .iter()
+        .map(|r| {
+            let path = if workspace_root.is_empty() {
+                String::new()
+            } else {
+                format!("{workspace_root}/{}", r.name)
+            };
+            json!({
+                "id": r.id.to_string(),
+                "name": r.name,
+                "path": path,
+            })
+        })
+        .collect();
+
+    obj.insert(
+        "workspace".to_string(),
+        json!({
+            "id": workspace.id.to_string(),
+            "workspace_path": workspace_root,
+            "worktree_path": primary_repo_path,
+            "branch": workspace.branch,
+            "repos": repos_json,
+        }),
+    );
+    // VkApiBackend::create_session reads params.workspace_id; mirror it here so
+    // callers don't have to populate it themselves.
+    obj.entry("workspace_id".to_string())
+        .or_insert_with(|| Value::String(workspace.id.to_string()));
+    Value::Object(obj)
 }
 
 pub async fn list_procedure_runs_for_project(

@@ -991,6 +991,7 @@ mod tests {
                 json!({
                     "goal": "add shout(text)",
                     "test_command": "true",
+                    "workspace": { "worktree_path": "/tmp" },
                 }),
             )
             .await

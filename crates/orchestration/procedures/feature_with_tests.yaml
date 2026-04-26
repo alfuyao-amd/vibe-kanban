@@ -30,7 +30,7 @@ states:
   plan:
     action:
       kind: create_session
-      executor: claude-opus-4-7
+      executor: CLAUDE_CODE
       prompt: |
         Plan the implementation of: {{goal}}
         Return: (1) files to touch, (2) test cases to add. Keep it brief.
@@ -41,12 +41,12 @@ states:
     action:
       kind: follow_up
       session_ref: plan
-      executor: claude-opus-4-7
+      executor: CLAUDE_CODE
       prompt: |
         Implement the plan. Write code AND tests. Keep the diff minimal.
     gate:
       kind: deterministic
-      run: "{{test_command}}"
+      run: "cd {{workspace.worktree_path}} && {{test_command}}"
       pass_when: "exit_code == 0"
     on_success: review
     on_failure: implement_retry
@@ -55,7 +55,7 @@ states:
     action:
       kind: follow_up
       session_ref: plan
-      executor: claude-opus-4-7
+      executor: CLAUDE_CODE
       prompt: |
         Tests failed. Output:
         {{gate.output}}
@@ -63,7 +63,7 @@ states:
     max_attempts: 2
     gate:
       kind: deterministic
-      run: "{{test_command}}"
+      run: "cd {{workspace.worktree_path}} && {{test_command}}"
       pass_when: "exit_code == 0"
     on_success: review
     on_failure: failed
@@ -72,7 +72,7 @@ states:
     action:
       kind: start_review
       session_ref: plan
-      executor: codex
+      executor: CLAUDE_CODE
       prompt: |
         Review this diff for correctness, style, and security.
         Respond as JSON: {"verdict": "pass"|"fail", "feedback": "..."}
@@ -86,7 +86,7 @@ states:
     action:
       kind: follow_up
       session_ref: plan
-      executor: claude-opus-4-7
+      executor: CLAUDE_CODE
       prompt: |
         Reviewer feedback:
         {{gate.response.feedback}}
