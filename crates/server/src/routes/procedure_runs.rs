@@ -224,7 +224,10 @@ pub async fn cancel_procedure_run(
             ApiError::BadRequest(format!("procedure run `{run_id}` not found or not running"))
         })?;
 
-    // If the run was parked on a human gate, wake it so the task exits.
+    // Two complementary signals: the cancel token interrupts a running tokio
+    // task at its next await (catches mid-action runs), and the approval
+    // channel wakes a run that's parked on a human gate.
+    procedure_runtime::cancellations().signal(run_id).await;
     procedure_runtime::approvals()
         .signal(run_id, ApprovalResult::Rejected)
         .await;

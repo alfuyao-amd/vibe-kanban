@@ -13,6 +13,7 @@ use std::{
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
@@ -119,6 +120,10 @@ pub struct StateHistoryEntry {
 pub enum RunOutcome {
     Success,
     Failure,
+    /// Run was interrupted by a cancellation signal. State machine bails between
+    /// states (and from any in-flight backend await it can drop), so observed
+    /// latency is bounded by the longest backend operation in flight.
+    Cancelled,
 }
 
 #[async_trait]
@@ -214,6 +219,13 @@ pub struct ProcedureExecutor<B: ExecutionBackend, S: RunStore> {
     gates: GateEvaluators,
 }
 
+/// Outcome of a single state's action+gate cycle.
+#[derive(Debug)]
+enum StateOutput {
+    Completed { passed: bool, event: StateEvent },
+    Cancelled,
+}
+
 impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
     pub fn new(backend: B, store: S, gates: GateEvaluators) -> Self {
         Self {
@@ -238,12 +250,36 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
         procedure: &Procedure,
         initial_params: Value,
     ) -> Result<RunOutcome, ExecutorError> {
+        self.run_with_id_cancellable(run_id, procedure, initial_params, None)
+            .await
+    }
+
+    /// Like [`run_with_id`] but observes `cancel_token`. When cancellation is
+    /// requested, the executor short-circuits to `RunOutcome::Cancelled`,
+    /// drops any in-flight backend future, and writes the terminal status to
+    /// the store before returning. Pass `None` to opt out (equivalent to
+    /// [`run_with_id`]).
+    pub async fn run_with_id_cancellable(
+        &self,
+        run_id: RunId,
+        procedure: &Procedure,
+        initial_params: Value,
+        cancel_token: Option<CancellationToken>,
+    ) -> Result<RunOutcome, ExecutorError> {
         procedure.validate()?;
         let mut context = RunContext::new(initial_params);
         let mut current = procedure.initial_state.clone();
         let mut attempts: HashMap<String, u32> = HashMap::new();
 
         loop {
+            // Cancellation check at the top of every iteration. This catches
+            // cancellation issued between states even when no backend await
+            // is in flight.
+            if Self::is_cancelled(&cancel_token) {
+                self.store.set_terminal(run_id, RunOutcome::Cancelled).await;
+                return Ok(RunOutcome::Cancelled);
+            }
+
             let state = procedure
                 .states
                 .get(&current)
@@ -264,7 +300,16 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
                 *entry
             };
 
-            let (passed, history_event) = self.execute_state(&current, state, &mut context).await?;
+            let (passed, history_event) = match self
+                .execute_state_cancellable(&current, state, &mut context, &cancel_token)
+                .await?
+            {
+                StateOutput::Completed { passed, event } => (passed, event),
+                StateOutput::Cancelled => {
+                    self.store.set_terminal(run_id, RunOutcome::Cancelled).await;
+                    return Ok(RunOutcome::Cancelled);
+                }
+            };
 
             let max_attempts = state.max_attempts.unwrap_or(1);
             let effective_passed = if passed {
@@ -322,6 +367,31 @@ impl<B: ExecutionBackend, S: RunStore> ProcedureExecutor<B, S> {
                 .persist_transition(run_id, &current, &next, entry)
                 .await;
             current = next;
+        }
+    }
+
+    fn is_cancelled(token: &Option<CancellationToken>) -> bool {
+        token.as_ref().is_some_and(|t| t.is_cancelled())
+    }
+
+    async fn execute_state_cancellable(
+        &self,
+        state_name: &str,
+        state: &crate::procedure::State,
+        context: &mut RunContext,
+        cancel_token: &Option<CancellationToken>,
+    ) -> Result<StateOutput, ExecutorError> {
+        let work = self.execute_state(state_name, state, context);
+
+        if let Some(token) = cancel_token {
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => Ok(StateOutput::Cancelled),
+                res = work => res.map(|(passed, event)| StateOutput::Completed { passed, event }),
+            }
+        } else {
+            let (passed, event) = work.await?;
+            Ok(StateOutput::Completed { passed, event })
         }
     }
 
@@ -1162,5 +1232,148 @@ mod tests {
     fn template_handles_integer_values() {
         let ctx = json!({"n": 42});
         assert_eq!(render_template("x={{n}}", &ctx), "x=42");
+    }
+
+    /// Backend whose `await_completion` blocks until cancelled, so we can
+    /// verify the executor short-circuits a mid-action run when its cancel
+    /// token fires.
+    struct SlowBackend;
+
+    #[async_trait]
+    impl ExecutionBackend for SlowBackend {
+        async fn create_session(
+            &self,
+            _executor: &str,
+            _prompt: &str,
+            _params: &Value,
+        ) -> Result<SessionId, BackendError> {
+            Ok(SessionId("slow-session".into()))
+        }
+        async fn follow_up(
+            &self,
+            _session_id: SessionId,
+            _executor: Option<&str>,
+            _prompt: &str,
+        ) -> Result<ExecutionId, BackendError> {
+            Ok(ExecutionId("slow-exec".into()))
+        }
+        async fn start_review(
+            &self,
+            _session_id: SessionId,
+            _executor: &str,
+            _prompt: &str,
+        ) -> Result<ExecutionId, BackendError> {
+            Ok(ExecutionId("slow-exec".into()))
+        }
+        async fn merge(&self, _session_id: SessionId) -> Result<MergeOutcome, BackendError> {
+            Ok(MergeOutcome::Merged {
+                commit_sha: "n/a".into(),
+            })
+        }
+        async fn await_completion(
+            &self,
+            _execution_id: ExecutionId,
+        ) -> Result<ExecutionOutput, BackendError> {
+            // Effectively forever for test purposes — long enough that cancel
+            // will land before this resolves.
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            Ok(ExecutionOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: Some(0),
+                last_assistant_message: None,
+            })
+        }
+    }
+
+    fn slow_follow_up_procedure() -> Procedure {
+        let mut states = IndexMap::new();
+        states.insert(
+            "plan".into(),
+            State {
+                action: Some(Action::CreateSession {
+                    executor: "c".into(),
+                    prompt: "p".into(),
+                }),
+                on_success: Some("work".into()),
+                ..Default::default()
+            },
+        );
+        states.insert(
+            "work".into(),
+            State {
+                action: Some(Action::FollowUp {
+                    session_ref: "plan".into(),
+                    executor: None,
+                    prompt: "do the long thing".into(),
+                }),
+                on_success: Some("done".into()),
+                ..Default::default()
+            },
+        );
+        states.insert(
+            "done".into(),
+            State {
+                terminal: Some(Terminal::Success),
+                ..Default::default()
+            },
+        );
+        Procedure {
+            name: "slow".into(),
+            version: 1,
+            description: String::new(),
+            triggers: Default::default(),
+            initial_state: "plan".into(),
+            states,
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_token_short_circuits_mid_action_to_cancelled() {
+        let store = InMemoryRunStore::new();
+        let executor = ProcedureExecutor::new(SlowBackend, store.clone(), default_gates());
+        let cancel = CancellationToken::new();
+        let cancel_for_signal = cancel.clone();
+        let run_id = RunId::new();
+
+        let handle = tokio::spawn(async move {
+            executor
+                .run_with_id_cancellable(
+                    run_id,
+                    &slow_follow_up_procedure(),
+                    json!({}),
+                    Some(cancel),
+                )
+                .await
+        });
+
+        // Yield long enough that `plan` has completed and `work` is parked
+        // inside `await_completion`'s 60s sleep.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        cancel_for_signal.cancel();
+
+        let outcome = tokio::time::timeout(std::time::Duration::from_secs(1), handle)
+            .await
+            .expect("cancellation should propagate within 1s")
+            .expect("task panicked")
+            .expect("executor returned Err");
+        assert_eq!(outcome, RunOutcome::Cancelled);
+        assert_eq!(store.terminal(run_id), Some(RunOutcome::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn cancel_token_pre_signaled_returns_cancelled_without_running() {
+        let store = InMemoryRunStore::new();
+        let executor = ProcedureExecutor::new(SlowBackend, store.clone(), default_gates());
+        let cancel = CancellationToken::new();
+        cancel.cancel(); // already cancelled before run starts
+
+        let run_id = RunId::new();
+        let outcome = executor
+            .run_with_id_cancellable(run_id, &slow_follow_up_procedure(), json!({}), Some(cancel))
+            .await
+            .expect("executor should not error on pre-cancelled token");
+        assert_eq!(outcome, RunOutcome::Cancelled);
+        assert_eq!(store.terminal(run_id), Some(RunOutcome::Cancelled));
     }
 }

@@ -30,6 +30,7 @@ use tokio::{
     sync::{Mutex, mpsc},
     task::JoinHandle,
 };
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub struct DbRunStore {
@@ -112,6 +113,7 @@ impl RunStore for DbRunStore {
         let status = match outcome {
             RunOutcome::Success => ProcedureRunStatus::Succeeded,
             RunOutcome::Failure => ProcedureRunStatus::Failed,
+            RunOutcome::Cancelled => ProcedureRunStatus::Cancelled,
         };
         let _ = ProcedureRun::update_status(&self.pool, run_id.0, status).await;
     }
@@ -151,6 +153,50 @@ static APPROVALS: OnceLock<ProcedureApprovalRegistry> = OnceLock::new();
 
 pub fn approvals() -> &'static ProcedureApprovalRegistry {
     APPROVALS.get_or_init(ProcedureApprovalRegistry::new)
+}
+
+/// Per-process registry of cancellation tokens, keyed by procedure run id.
+/// `spawn_procedure_run` registers a fresh token when starting a run and
+/// removes it when the run terminates. The `/cancel` route flips the matching
+/// token, which racks the in-flight `execute_state` future and short-circuits
+/// the state machine to `RunOutcome::Cancelled` at the next await point.
+#[derive(Clone, Default)]
+pub struct ProcedureCancelRegistry {
+    inner: Arc<Mutex<HashMap<Uuid, CancellationToken>>>,
+}
+
+impl ProcedureCancelRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub async fn register(&self, run_id: Uuid, token: CancellationToken) {
+        self.inner.lock().await.insert(run_id, token);
+    }
+
+    pub async fn deregister(&self, run_id: Uuid) {
+        self.inner.lock().await.remove(&run_id);
+    }
+
+    /// Flip the cancellation token for `run_id` if one is registered. Returns
+    /// `true` if a live token was signalled, `false` if no run was found
+    /// (already terminal, or never registered).
+    pub async fn signal(&self, run_id: Uuid) -> bool {
+        let token = self.inner.lock().await.get(&run_id).cloned();
+        match token {
+            Some(t) => {
+                t.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+static CANCELS: OnceLock<ProcedureCancelRegistry> = OnceLock::new();
+
+pub fn cancellations() -> &'static ProcedureCancelRegistry {
+    CANCELS.get_or_init(ProcedureCancelRegistry::new)
 }
 
 /// HumanApprovalSource that flips the DB row to awaiting_approval while it
@@ -708,14 +754,22 @@ pub fn spawn_procedure_run(
     params: Value,
 ) -> JoinHandle<()> {
     let backend_kind = std::env::var("VIBE_PROCEDURE_BACKEND").unwrap_or_default();
+    let cancel_token = CancellationToken::new();
+    let cancel_token_for_executor = cancel_token.clone();
     tokio::spawn(async move {
+        cancellations().register(run_id, cancel_token).await;
         let store = DbRunStore::new(pool.clone());
         let gates = gates_for_run(run_id, pool.clone()).await;
         let outcome = if backend_kind.eq_ignore_ascii_case("stub") {
             tracing::info!(?run_id, "procedure run using StubBackend");
             let executor = ProcedureExecutor::new(StubBackend, store, gates);
             executor
-                .run_with_id(RunId(run_id), &procedure, params)
+                .run_with_id_cancellable(
+                    RunId(run_id),
+                    &procedure,
+                    params,
+                    Some(cancel_token_for_executor),
+                )
                 .await
         } else {
             match VkApiBackend::from_env() {
@@ -723,7 +777,12 @@ pub fn spawn_procedure_run(
                     tracing::info!(?run_id, base_url = %backend.base_url, "procedure run using VkApiBackend");
                     let executor = ProcedureExecutor::new(backend, store, gates);
                     executor
-                        .run_with_id(RunId(run_id), &procedure, params)
+                        .run_with_id_cancellable(
+                            RunId(run_id),
+                            &procedure,
+                            params,
+                            Some(cancel_token_for_executor),
+                        )
                         .await
                 }
                 Err(err) => {
@@ -731,6 +790,7 @@ pub fn spawn_procedure_run(
                     let _ = ProcedureRun::update_status(&pool, run_id, ProcedureRunStatus::Failed)
                         .await;
                     approvals().deregister(run_id).await;
+                    cancellations().deregister(run_id).await;
                     return;
                 }
             }
@@ -744,6 +804,7 @@ pub fn spawn_procedure_run(
             }
         }
         approvals().deregister(run_id).await;
+        cancellations().deregister(run_id).await;
     })
 }
 
@@ -774,6 +835,32 @@ mod tests {
             .signal(Uuid::new_v4(), ApprovalResult::Approved)
             .await;
         assert!(!delivered);
+    }
+
+    #[tokio::test]
+    async fn cancel_registry_signals_registered_run_and_returns_false_after_dereg() {
+        let registry = ProcedureCancelRegistry::new();
+        let run_id = Uuid::new_v4();
+        let token = CancellationToken::new();
+        registry.register(run_id, token.clone()).await;
+
+        let signalled = registry.signal(run_id).await;
+        assert!(signalled, "signal should find the registered token");
+        assert!(token.is_cancelled(), "token should be flipped");
+
+        registry.deregister(run_id).await;
+        let signalled_after = registry.signal(run_id).await;
+        assert!(
+            !signalled_after,
+            "signal should be a no-op after deregister"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_registry_signal_is_no_op_for_unknown_run() {
+        let registry = ProcedureCancelRegistry::new();
+        let signalled = registry.signal(Uuid::new_v4()).await;
+        assert!(!signalled);
     }
 
     #[test]
