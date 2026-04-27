@@ -186,7 +186,20 @@ async fn enrich_params_with_workspace(
     // callers don't have to populate it themselves.
     obj.entry("workspace_id".to_string())
         .or_insert_with(|| Value::String(workspace.id.to_string()));
+    // YAML procedures (e.g. `feature_with_tests`'s `human_approval` prompt)
+    // can reference `{{diff_url}}` to point the human at the workspace's
+    // changes view. Relative path; the run-detail UI renders it as a link.
+    obj.entry("diff_url".to_string())
+        .or_insert_with(|| Value::String(diff_url_for_workspace(workspace.id)));
     Value::Object(obj)
+}
+
+/// Frontend-relative URL pointing at the workspace's main view, where the
+/// existing diff/changes panel lives. Kept as a free function (rather than
+/// hardcoded inline) so tests and the run-detail UI can stay in sync if the
+/// route shape ever changes.
+pub fn diff_url_for_workspace(workspace_id: Uuid) -> String {
+    format!("/workspaces/{workspace_id}")
 }
 
 pub async fn list_procedure_runs_for_project(
@@ -294,4 +307,23 @@ pub fn router() -> Router<DeploymentImpl> {
             "/procedure-runs/{run_id}/reject",
             post(reject_procedure_run),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_url_points_at_workspace_route() {
+        let id = Uuid::new_v4();
+        let url = diff_url_for_workspace(id);
+        assert!(
+            url.starts_with("/workspaces/"),
+            "expected relative workspace path, got `{url}`"
+        );
+        assert!(
+            url.contains(&id.to_string()),
+            "URL should embed workspace id: `{url}`"
+        );
+    }
 }

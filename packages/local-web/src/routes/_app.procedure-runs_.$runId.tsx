@@ -1,7 +1,8 @@
 import { createFileRoute, Link, useParams } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { proceduresApi } from '@/shared/lib/api';
-import type { ProcedureRun, StateHistoryEntry } from 'shared/types';
+import { useDiffStream } from '@/shared/hooks/useDiffStream';
+import type { Diff, ProcedureRun, StateHistoryEntry } from 'shared/types';
 
 function statusBadgeClass(status: string): string {
   switch (status) {
@@ -69,6 +70,84 @@ function HistoryRow({
   );
 }
 
+function extractWorkspaceId(params: unknown): string | null {
+  if (!params || typeof params !== 'object') return null;
+  const wid = (params as Record<string, unknown>).workspace_id;
+  return typeof wid === 'string' && wid.length > 0 ? wid : null;
+}
+
+function fileLabel(d: Diff): string {
+  return d.newPath ?? d.oldPath ?? '(unknown)';
+}
+
+function DiffPreview({ workspaceId }: { workspaceId: string }) {
+  const { diffs, isInitialized, error } = useDiffStream(workspaceId, true, {
+    statsOnly: true,
+  });
+
+  if (error) {
+    return (
+      <div className="text-xs text-rose-500 mt-2">
+        Could not load diff stats: {error}
+      </div>
+    );
+  }
+  if (!isInitialized) {
+    return <div className="text-xs text-low mt-2">Loading diff stats…</div>;
+  }
+  if (diffs.length === 0) {
+    return (
+      <div className="text-xs text-low mt-2">
+        No changes detected in this workspace.
+      </div>
+    );
+  }
+
+  const totals = diffs.reduce(
+    (acc, d) => {
+      acc.added += d.additions ?? 0;
+      acc.deleted += d.deletions ?? 0;
+      return acc;
+    },
+    { added: 0, deleted: 0 }
+  );
+
+  return (
+    <div className="mt-3 text-xs">
+      <div className="mb-1 text-low">
+        {diffs.length} file{diffs.length === 1 ? '' : 's'} changed ·{' '}
+        <span className="text-emerald-600 dark:text-emerald-400">
+          +{totals.added}
+        </span>{' '}
+        <span className="text-rose-600 dark:text-rose-400">
+          −{totals.deleted}
+        </span>
+      </div>
+      <ul className="font-mono">
+        {diffs.slice(0, 20).map((d) => (
+          <li key={fileLabel(d)} className="truncate">
+            <span className="text-low mr-1">{d.change}</span>
+            {fileLabel(d)}
+            {(d.additions || d.deletions) && (
+              <span className="ml-2">
+                <span className="text-emerald-600 dark:text-emerald-400">
+                  +{d.additions ?? 0}
+                </span>{' '}
+                <span className="text-rose-600 dark:text-rose-400">
+                  −{d.deletions ?? 0}
+                </span>
+              </span>
+            )}
+          </li>
+        ))}
+        {diffs.length > 20 && (
+          <li className="text-low">…and {diffs.length - 20} more</li>
+        )}
+      </ul>
+    </div>
+  );
+}
+
 function ProcedureRunDetail() {
   const { runId } = useParams({ from: '/_app/procedure-runs_/$runId' });
   const queryClient = useQueryClient();
@@ -118,6 +197,7 @@ function ProcedureRunDetail() {
   const run = data;
   const isAwaiting = run.status === 'awaiting_approval';
   const isLive = run.status === 'running' || run.status === 'awaiting_approval';
+  const workspaceId = extractWorkspaceId(run.params);
 
   return (
     <div className="flex flex-col p-6 gap-6 max-w-4xl">
@@ -152,6 +232,19 @@ function ProcedureRunDetail() {
           </div>
           {run.pending_approval_prompt && (
             <div className="text-sm mb-3">{run.pending_approval_prompt}</div>
+          )}
+          {workspaceId && (
+            <div className="mb-3">
+              <a
+                href={`/workspaces/${workspaceId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block rounded border border-amber-400 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/40 text-xs px-2 py-1"
+              >
+                Review changes in workspace ↗
+              </a>
+              <DiffPreview workspaceId={workspaceId} />
+            </div>
           )}
           <div className="flex gap-2">
             <button

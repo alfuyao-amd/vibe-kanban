@@ -98,7 +98,7 @@ states:
   human_approval:
     gate:
       kind: human
-      prompt: "Approve merge of {{diff_url}}?"
+      prompt: "Reviewer approved. Open the workspace at {{diff_url}} to see the diff. Approve merge?"
     on_success: merge
     on_failure: failed
 
