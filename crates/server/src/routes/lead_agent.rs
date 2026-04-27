@@ -88,6 +88,7 @@ pub async fn start_lead_agent(
         LeadAgentStartError::Backend(_) => ApiError::BadGateway(e.to_string()),
         LeadAgentStartError::Db(err) => ApiError::Database(err),
         LeadAgentStartError::InvalidSessionId(_) => ApiError::BadGateway(e.to_string()),
+        LeadAgentStartError::McpConfig(err) => ApiError::Io(err),
     })?;
     Ok(ResponseJson(ApiResponse::success(session)))
 }

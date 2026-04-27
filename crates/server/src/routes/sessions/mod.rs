@@ -11,6 +11,7 @@ use axum::{
 use db::models::{
     coding_agent_turn::CodingAgentTurn,
     execution_process::{ExecutionProcess, ExecutionProcessRunReason},
+    project_lead_agent::ProjectLeadAgent,
     requests::UpdateSession,
     scratch::{Scratch, ScratchType},
     session::{CreateSession, Session, SessionError},
@@ -124,7 +125,7 @@ pub struct ResetProcessRequest {
 pub async fn follow_up(
     Extension(session): Extension<Session>,
     State(deployment): State<DeploymentImpl>,
-    Json(payload): Json<CreateFollowUpAttempt>,
+    Json(mut payload): Json<CreateFollowUpAttempt>,
 ) -> Result<ResponseJson<ApiResponse<ExecutionProcess>>, ApiError> {
     let pool = &deployment.db().pool;
 
@@ -141,6 +142,25 @@ pub async fn follow_up(
         .container()
         .ensure_container_exists(&workspace)
         .await?;
+
+    // If this session is a project lead-agent session, ensure every turn loads
+    // the project-orchestrator MCP config. The client doesn't need to know.
+    if payload.executor_config.mcp_config_paths.is_none()
+        && let Some(lead_agent) = ProjectLeadAgent::find_by_session_id(pool, session.id).await?
+    {
+        match crate::lead_agent::ensure_mcp_config_file(lead_agent.project_id) {
+            Ok(path) => {
+                payload.executor_config.mcp_config_paths = Some(vec![path.display().to_string()]);
+            }
+            Err(err) => {
+                tracing::warn!(
+                    project_id = %lead_agent.project_id,
+                    %err,
+                    "failed to ensure lead-agent MCP config; proceeding without it"
+                );
+            }
+        }
+    }
 
     let executor_profile_id = payload.executor_config.profile_id();
 

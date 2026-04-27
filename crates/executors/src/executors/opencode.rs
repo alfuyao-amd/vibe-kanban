@@ -765,6 +765,7 @@ impl StandardCodingAgentExecutor for Opencode {
             } else {
                 PermissionPolicy::Supervised
             }),
+            mcp_config_paths: None,
         }
     }
 }

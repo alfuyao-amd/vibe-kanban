@@ -306,6 +306,7 @@ impl StandardCodingAgentExecutor for Codex {
                 .as_ref()
                 .map(|e| e.as_ref().to_string()),
             permission_policy: Some(permission_policy),
+            mcp_config_paths: None,
         }
     }
 

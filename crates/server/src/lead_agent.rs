@@ -5,6 +5,8 @@
 //! executor stack. The picked plan is *not* run — the caller (typically the
 //! UI) reviews it and decides whether to start a procedure run.
 
+use std::path::PathBuf;
+
 use db::models::{procedure_run::ProcedureRun, project_lead_agent::ProjectLeadAgent};
 use orchestration::{Procedure, gates::extract_json_object};
 use serde::{Deserialize, Serialize};
@@ -14,6 +16,106 @@ use ts_rs::TS;
 use uuid::Uuid;
 
 use crate::{procedure_catalog, procedure_runtime::VkApiBackend};
+
+/// Subdirectory under the asset root where per-project lead-agent MCP configs
+/// are written.
+const LEAD_AGENT_MCP_SUBDIR: &str = "lead_agent_mcp";
+/// Server name used inside the generated MCP config — the agent's tool calls
+/// surface as `mcp__vibe_kanban_project__<tool>`.
+const LEAD_AGENT_MCP_SERVER_NAME: &str = "vibe_kanban_project";
+
+/// Path to the per-project MCP config file the lead agent's Claude session
+/// loads via `--mcp-config`. Does not check existence — pair with
+/// [`ensure_mcp_config_file`] when you want it on disk.
+pub fn mcp_config_file_for_project(project_id: Uuid) -> PathBuf {
+    utils::assets::asset_dir()
+        .join(LEAD_AGENT_MCP_SUBDIR)
+        .join(format!("{project_id}.json"))
+}
+
+/// Build the JSON body for a project lead-agent's MCP config file. Picks the
+/// command/args based on environment:
+/// - `VIBE_LEAD_AGENT_MCP_BIN`: explicit override path to the binary.
+/// - debug builds: locally-built `vibe-kanban-mcp` next to the running server,
+///   if it exists.
+/// - otherwise: `npx -y vibe-kanban@latest mcp ...`.
+///
+/// Forwards `VIBE_BACKEND_URL`, `BACKEND_PORT`, `HOST` to the spawned server
+/// so it dials the same backend the lead agent is talking to.
+pub fn build_mcp_config_body(project_id: Uuid) -> Value {
+    let project_id_str = project_id.to_string();
+    let env = forwarded_env_for_mcp();
+
+    let server = if let Ok(bin) = std::env::var("VIBE_LEAD_AGENT_MCP_BIN") {
+        serde_json::json!({
+            "command": bin,
+            "args": ["--mode", "project-orchestrator", "--project-id", project_id_str],
+            "env": env,
+        })
+    } else if let Some(dev_bin) = debug_mcp_binary_path() {
+        serde_json::json!({
+            "command": dev_bin.display().to_string(),
+            "args": ["--mode", "project-orchestrator", "--project-id", project_id_str],
+            "env": env,
+        })
+    } else {
+        serde_json::json!({
+            "command": "npx",
+            "args": [
+                "-y",
+                "vibe-kanban@latest",
+                "mcp",
+                "--mode",
+                "project-orchestrator",
+                "--project-id",
+                project_id_str,
+            ],
+            "env": env,
+        })
+    };
+
+    serde_json::json!({
+        "mcpServers": { LEAD_AGENT_MCP_SERVER_NAME: server }
+    })
+}
+
+fn forwarded_env_for_mcp() -> serde_json::Map<String, Value> {
+    let mut env = serde_json::Map::new();
+    for key in [
+        "VIBE_BACKEND_URL",
+        "BACKEND_PORT",
+        "HOST",
+        "MCP_HOST",
+        "MCP_PORT",
+    ] {
+        if let Ok(val) = std::env::var(key) {
+            env.insert(key.to_string(), Value::String(val));
+        }
+    }
+    env
+}
+
+fn debug_mcp_binary_path() -> Option<PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let candidate = exe_dir.join("vibe-kanban-mcp");
+    candidate.exists().then_some(candidate)
+}
+
+/// Write the per-project MCP config file (overwriting any prior contents) and
+/// return its path. Idempotent — safe to call on every lead-agent spawn so the
+/// config picks up env changes.
+pub fn ensure_mcp_config_file(project_id: Uuid) -> std::io::Result<PathBuf> {
+    let path = mcp_config_file_for_project(project_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = build_mcp_config_body(project_id);
+    std::fs::write(&path, serde_json::to_string_pretty(&body)?)?;
+    Ok(path)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct PickedPlan {
@@ -107,7 +209,7 @@ pub async fn plan_for_goal(
     let prompt = build_prompt(goal, &procedures);
 
     let (_session_id, output) = backend
-        .create_session_with_output("CLAUDE_CODE", &prompt, workspace_id)
+        .create_session_with_output("CLAUDE_CODE", &prompt, workspace_id, None)
         .await
         .map_err(|e| PlanError::Backend(e.to_string()))?;
 
@@ -164,7 +266,9 @@ pub async fn bootstrap_prompt(pool: &SqlitePool, project_id: Uuid) -> Result<Str
          step 3. Want me to run it?\"\n\n\
          Use other tools as needed: `list_procedures`, `start_procedure`, \
          `get_procedure_state`, `cancel_procedure`, `delete_procedure`, \
-         `approve_procedure_run`, `reject_procedure_run`.\n\n",
+         `approve_procedure_run`, `reject_procedure_run`. They are exposed by \
+         the `vibe_kanban_project` MCP server already attached to this \
+         session, so prefer them over shell commands or REST calls.\n\n",
     );
 
     s.push_str("--- Procedure YAML schema ---\n");
@@ -259,11 +363,15 @@ pub enum LeadAgentStartError {
     Db(#[from] sqlx::Error),
     #[error("invalid session id from backend: {0}")]
     InvalidSessionId(String),
+    #[error("write mcp config: {0}")]
+    McpConfig(#[from] std::io::Error),
 }
 
 /// Create a Claude session for the project lead agent in the given workspace,
 /// seed it with the bootstrap prompt, and persist the (project, session)
-/// mapping. Returns the new session info.
+/// mapping. Also writes the project-orchestrator MCP config file and attaches
+/// it via `--mcp-config` so the agent's first turn can already call MCP tools.
+/// Returns the new session info.
 pub async fn start_session(
     backend: &VkApiBackend,
     pool: &SqlitePool,
@@ -271,8 +379,10 @@ pub async fn start_session(
     workspace_id: Uuid,
 ) -> Result<LeadAgentSession, LeadAgentStartError> {
     let prompt = bootstrap_prompt(pool, project_id).await?;
+    let mcp_config_path = ensure_mcp_config_file(project_id)?;
+    let mcp_config_paths = Some(vec![mcp_config_path.display().to_string()]);
     let (session_id, _output) = backend
-        .create_session_with_output("CLAUDE_CODE", &prompt, workspace_id)
+        .create_session_with_output("CLAUDE_CODE", &prompt, workspace_id, mcp_config_paths)
         .await
         .map_err(|e| LeadAgentStartError::Backend(e.to_string()))?;
     let session_uuid = Uuid::parse_str(&session_id.0)
@@ -307,5 +417,53 @@ states:
         assert!(prompt.contains("smoke"));
         assert!(prompt.contains("add a thing"));
         assert!(prompt.contains("procedure_name"));
+    }
+
+    #[test]
+    fn mcp_config_body_pins_project_and_uses_orchestrator_mode() {
+        let project_id = Uuid::new_v4();
+        // Suppress env-driven branches so the assertion targets the default
+        // shape rather than whatever is set on the developer's shell.
+        // SAFETY: tests run single-threaded within a process for env isolation
+        // is not guaranteed, but unsetting these only narrows the assertion.
+        unsafe {
+            std::env::remove_var("VIBE_LEAD_AGENT_MCP_BIN");
+        }
+        let body = build_mcp_config_body(project_id);
+
+        let server = body
+            .get("mcpServers")
+            .and_then(|v| v.get("vibe_kanban_project"))
+            .expect("vibe_kanban_project entry");
+        let args: Vec<String> = server
+            .get("args")
+            .and_then(|v| v.as_array())
+            .expect("args array")
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect();
+
+        assert!(
+            args.contains(&"--mode".to_string())
+                && args.contains(&"project-orchestrator".to_string()),
+            "args should select project-orchestrator mode: {args:?}"
+        );
+        assert!(
+            args.contains(&"--project-id".to_string()) && args.contains(&project_id.to_string()),
+            "args should pin the project_id: {args:?}"
+        );
+    }
+
+    #[test]
+    fn mcp_config_file_path_is_per_project() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let pa = mcp_config_file_for_project(a);
+        let pb = mcp_config_file_for_project(b);
+        assert_ne!(pa, pb);
+        assert!(
+            pa.to_string_lossy().contains(&a.to_string()),
+            "path should embed project id: {pa:?}"
+        );
     }
 }

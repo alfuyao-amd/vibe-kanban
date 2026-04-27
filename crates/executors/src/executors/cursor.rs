@@ -638,6 +638,7 @@ impl StandardCodingAgentExecutor for CursorAgent {
             agent_id: None,
             reasoning_id: self.reasoning.clone(),
             permission_policy: Some(crate::model_selector::PermissionPolicy::Auto),
+            mcp_config_paths: None,
         }
     }
 

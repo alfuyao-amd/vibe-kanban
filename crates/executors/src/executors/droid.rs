@@ -227,6 +227,7 @@ impl StandardCodingAgentExecutor for Droid {
                 .as_ref()
                 .map(|e| e.as_ref().to_string()),
             permission_policy: Some(crate::model_selector::PermissionPolicy::Auto),
+            mcp_config_paths: None,
         }
     }
 

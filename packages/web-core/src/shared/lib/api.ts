@@ -1072,10 +1072,7 @@ export const projectsApi = {
 };
 
 export const leadAgentApi = {
-  plan: async (
-    projectId: string,
-    body: PlanRequest
-  ): Promise<PickedPlan> => {
+  plan: async (projectId: string, body: PlanRequest): Promise<PickedPlan> => {
     const response = await makeRequest(
       `/api/projects/${projectId}/lead-agent/plan`,
       {
@@ -1087,9 +1084,7 @@ export const leadAgentApi = {
   },
 
   getSession: async (projectId: string): Promise<LeadAgentSession | null> => {
-    const response = await makeRequest(
-      `/api/projects/${projectId}/lead-agent`
-    );
+    const response = await makeRequest(`/api/projects/${projectId}/lead-agent`);
     return handleApiResponse<LeadAgentSession | null>(response);
   },
 
@@ -1115,9 +1110,7 @@ export const proceduresApi = {
   },
 
   listForProject: async (projectId: string): Promise<ProcedureSummary[]> => {
-    const response = await makeRequest(
-      `/api/projects/${projectId}/procedures`
-    );
+    const response = await makeRequest(`/api/projects/${projectId}/procedures`);
     return handleApiResponse<ProcedureSummary[]>(response);
   },
 
@@ -1176,26 +1169,23 @@ export const proceduresApi = {
   },
 
   approve: async (runId: string): Promise<ProcedureRun> => {
-    const response = await makeRequest(
-      `/api/procedure-runs/${runId}/approve`,
-      { method: 'POST' }
-    );
+    const response = await makeRequest(`/api/procedure-runs/${runId}/approve`, {
+      method: 'POST',
+    });
     return handleApiResponse<ProcedureRun>(response);
   },
 
   reject: async (runId: string): Promise<ProcedureRun> => {
-    const response = await makeRequest(
-      `/api/procedure-runs/${runId}/reject`,
-      { method: 'POST' }
-    );
+    const response = await makeRequest(`/api/procedure-runs/${runId}/reject`, {
+      method: 'POST',
+    });
     return handleApiResponse<ProcedureRun>(response);
   },
 
   cancel: async (runId: string): Promise<ProcedureRun> => {
-    const response = await makeRequest(
-      `/api/procedure-runs/${runId}/cancel`,
-      { method: 'POST' }
-    );
+    const response = await makeRequest(`/api/procedure-runs/${runId}/cancel`, {
+      method: 'POST',
+    });
     return handleApiResponse<ProcedureRun>(response);
   },
 };

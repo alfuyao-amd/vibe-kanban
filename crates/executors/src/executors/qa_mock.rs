@@ -117,6 +117,7 @@ impl StandardCodingAgentExecutor for QaMockExecutor {
             agent_id: None,
             reasoning_id: None,
             permission_policy: Some(crate::model_selector::PermissionPolicy::Auto),
+            mcp_config_paths: None,
         }
     }
 }

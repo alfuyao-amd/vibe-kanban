@@ -33,7 +33,13 @@ function formatTime(value: string | Date | null | undefined): string {
   return d.toLocaleString();
 }
 
-function HistoryRow({ entry, index }: { entry: StateHistoryEntry; index: number }) {
+function HistoryRow({
+  entry,
+  index,
+}: {
+  entry: StateHistoryEntry;
+  index: number;
+}) {
   return (
     <li className="relative pl-6 pb-4">
       <span className="absolute left-0 top-1 inline-block h-3 w-3 rounded-full bg-zinc-300 dark:bg-zinc-700" />
@@ -42,15 +48,23 @@ function HistoryRow({ entry, index }: { entry: StateHistoryEntry; index: number 
         <span className="font-mono">{index + 1}.</span>{' '}
         <span className="font-medium">{entry.state}</span>
         {entry.attempt > 1 && (
-          <span className="text-xs text-low ml-1">(attempt {entry.attempt})</span>
+          <span className="text-xs text-low ml-1">
+            (attempt {entry.attempt})
+          </span>
         )}
         {' → '}
-        <span className={outcomeColor(entry.outcome)}>{entry.outcome ?? 'pending'}</span>
+        <span className={outcomeColor(entry.outcome)}>
+          {entry.outcome ?? 'pending'}
+        </span>
       </div>
       {entry.gate_summary && (
-        <div className="text-xs font-mono text-low mt-0.5">{entry.gate_summary}</div>
+        <div className="text-xs font-mono text-low mt-0.5">
+          {entry.gate_summary}
+        </div>
       )}
-      <div className="text-xs text-low mt-0.5">{formatTime(entry.entered_at)}</div>
+      <div className="text-xs text-low mt-0.5">
+        {formatTime(entry.entered_at)}
+      </div>
     </li>
   );
 }
@@ -116,7 +130,9 @@ function ProcedureRunDetail() {
         </Link>
         <div className="flex items-baseline gap-3">
           <h1 className="text-xl font-semibold">{run.procedure_name}</h1>
-          <span className="text-xs text-low">v{String(run.procedure_version)}</span>
+          <span className="text-xs text-low">
+            v{String(run.procedure_version)}
+          </span>
           <span
             className={`rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass(run.status)}`}
           >
@@ -168,7 +184,11 @@ function ProcedureRunDetail() {
         ) : (
           <ol className="text-sm">
             {run.state_history.map((entry, i) => (
-              <HistoryRow key={`${entry.state}-${entry.attempt}-${i}`} entry={entry} index={i} />
+              <HistoryRow
+                key={`${entry.state}-${entry.attempt}-${i}`}
+                entry={entry}
+                index={i}
+              />
             ))}
           </ol>
         )}
@@ -191,7 +211,9 @@ function ProcedureRunDetail() {
             {cancelMutation.isPending ? 'Cancelling…' : 'Cancel run'}
           </button>
           {cancelMutation.error && (
-            <div className="text-xs text-rose-500 mt-2">{cancelMutation.error.message}</div>
+            <div className="text-xs text-rose-500 mt-2">
+              {cancelMutation.error.message}
+            </div>
           )}
         </section>
       )}

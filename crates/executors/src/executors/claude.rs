@@ -139,6 +139,14 @@ pub struct ClaudeCode {
     #[serde(flatten)]
     pub cmd: CmdOverrides,
 
+    /// Per-spawn MCP server config files to attach via `--mcp-config <path>`.
+    /// Populated from `ExecutorConfig::mcp_config_paths` in `apply_overrides`;
+    /// not user-facing and never persisted with the profile.
+    #[serde(skip)]
+    #[ts(skip)]
+    #[derivative(Debug = "ignore", PartialEq = "ignore")]
+    runtime_mcp_config_paths: Vec<std::path::PathBuf>,
+
     #[serde(skip)]
     #[ts(skip)]
     #[derivative(Debug = "ignore", PartialEq = "ignore")]
@@ -192,6 +200,10 @@ impl ClaudeCode {
             "--include-partial-messages",
             "--replay-user-messages",
         ]);
+        for path in &self.runtime_mcp_config_paths {
+            builder =
+                builder.extend_params(["--mcp-config".to_string(), path.display().to_string()]);
+        }
 
         apply_overrides(builder, &self.cmd)
     }
@@ -338,6 +350,13 @@ impl StandardCodingAgentExecutor for ClaudeCode {
                     self.approvals = Some(false);
                 }
             }
+        }
+        if let Some(paths) = &executor_config.mcp_config_paths {
+            self.runtime_mcp_config_paths = paths
+                .iter()
+                .filter(|p| !p.is_empty())
+                .map(std::path::PathBuf::from)
+                .collect();
         }
     }
 
@@ -589,6 +608,7 @@ impl StandardCodingAgentExecutor for ClaudeCode {
             agent_id: None,
             reasoning_id: self.effort.as_ref().map(|e| e.as_ref().to_owned()),
             permission_policy: Some(permission_policy),
+            mcp_config_paths: None,
         }
     }
 
@@ -2933,6 +2953,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn apply_overrides_threads_mcp_config_paths_into_command() {
+        use crate::profile::ExecutorConfig;
+
+        let mut executor = ClaudeCode {
+            claude_code_router: Some(false),
+            plan: None,
+            approvals: None,
+            model: None,
+            effort: None,
+            agent: None,
+            append_prompt: AppendPrompt::default(),
+            dangerously_skip_permissions: None,
+            cmd: crate::command::CmdOverrides {
+                base_command_override: None,
+                additional_params: None,
+                env: None,
+            },
+            runtime_mcp_config_paths: Vec::new(),
+            approvals_service: None,
+            disable_api_key: None,
+        };
+        let mut cfg = ExecutorConfig::new(crate::executors::BaseCodingAgent::ClaudeCode);
+        cfg.mcp_config_paths = Some(vec![
+            "/tmp/lead-agent/proj-a.json".to_string(),
+            "/tmp/lead-agent/proj-b.json".to_string(),
+        ]);
+
+        executor.apply_overrides(&cfg);
+        let builder = executor
+            .build_command_builder()
+            .await
+            .expect("command builder");
+        let params = builder.params.expect("params");
+
+        let mut idx = 0;
+        let mut found = 0;
+        while idx + 1 < params.len() {
+            if params[idx] == "--mcp-config"
+                && (params[idx + 1] == "/tmp/lead-agent/proj-a.json"
+                    || params[idx + 1] == "/tmp/lead-agent/proj-b.json")
+            {
+                found += 1;
+            }
+            idx += 1;
+        }
+        assert_eq!(
+            found, 2,
+            "expected both --mcp-config entries; got {params:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_streaming_patch_generation() {
         use std::sync::Arc;
 
@@ -2952,6 +3024,7 @@ mod tests {
                 additional_params: None,
                 env: None,
             },
+            runtime_mcp_config_paths: Vec::new(),
             approvals_service: None,
             disable_api_key: None,
         };

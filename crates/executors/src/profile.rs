@@ -141,6 +141,11 @@ pub struct ExecutorConfig {
     /// Permission policy override
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_policy: Option<PermissionPolicy>,
+    /// Extra MCP server config files to attach for this spawn.
+    /// Currently consumed by ClaudeCode (translated into `--mcp-config <path>` args).
+    /// Files must already exist on disk; the executor only reads them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_config_paths: Option<Vec<String>>,
 }
 
 impl ExecutorConfig {
@@ -153,6 +158,7 @@ impl ExecutorConfig {
             agent_id: None,
             reasoning_id: None,
             permission_policy: None,
+            mcp_config_paths: None,
         }
     }
 
@@ -170,6 +176,10 @@ impl ExecutorConfig {
             || self.agent_id.is_some()
             || self.reasoning_id.is_some()
             || self.permission_policy.is_some()
+            || self
+                .mcp_config_paths
+                .as_ref()
+                .is_some_and(|p| !p.is_empty())
     }
 }
 
@@ -182,6 +192,7 @@ impl From<ExecutorProfileId> for ExecutorConfig {
             agent_id: None,
             reasoning_id: None,
             permission_policy: None,
+            mcp_config_paths: None,
         }
     }
 }

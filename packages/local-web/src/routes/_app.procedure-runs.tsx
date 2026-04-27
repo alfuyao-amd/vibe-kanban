@@ -1,9 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  createFileRoute,
-  Link,
-  useNavigate,
-} from '@tanstack/react-router';
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
@@ -46,7 +42,11 @@ function formatTime(value: string | Date): string {
   return d.toLocaleString();
 }
 
-function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string }) {
+function StartProcedureForm({
+  defaultProjectId,
+}: {
+  defaultProjectId?: string;
+}) {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
@@ -81,12 +81,20 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
     }
   }, [projectId, projectsQuery.data]);
   useEffect(() => {
-    if (!procedureName && proceduresQuery.data && proceduresQuery.data.length > 0) {
+    if (
+      !procedureName &&
+      proceduresQuery.data &&
+      proceduresQuery.data.length > 0
+    ) {
       setProcedureName(proceduresQuery.data[0].name);
     }
   }, [procedureName, proceduresQuery.data]);
   useEffect(() => {
-    if (!workspaceId && workspacesQuery.data && workspacesQuery.data.length > 0) {
+    if (
+      !workspaceId &&
+      workspacesQuery.data &&
+      workspacesQuery.data.length > 0
+    ) {
       setWorkspaceId(workspacesQuery.data[0].id);
     }
   }, [workspaceId, workspacesQuery.data]);
@@ -112,7 +120,9 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
     setProcedureName(plan.procedure_name);
     const next: Record<string, string> = {};
     if (plan.params && typeof plan.params === 'object') {
-      for (const [k, v] of Object.entries(plan.params as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(
+        plan.params as Record<string, unknown>
+      )) {
         if (v == null) continue;
         next[k] = typeof v === 'string' ? v : JSON.stringify(v);
       }
@@ -132,7 +142,9 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
     },
     onSuccess: (plan) => {
       applyPickedPlan(plan);
-      setPlanNote(`Picked ${plan.procedure_name}. Review params, then Start run.`);
+      setPlanNote(
+        `Picked ${plan.procedure_name}. Review params, then Start run.`
+      );
     },
   });
 
@@ -161,7 +173,11 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
     },
   });
 
-  if (projectsQuery.isLoading || proceduresQuery.isLoading || workspacesQuery.isLoading) {
+  if (
+    projectsQuery.isLoading ||
+    proceduresQuery.isLoading ||
+    workspacesQuery.isLoading
+  ) {
     return (
       <div className="rounded border p-4 text-sm text-low">Loading form…</div>
     );
@@ -179,7 +195,9 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-low">
             Plan from a goal{' '}
-            <span className="text-low">(asks Claude to pick a procedure + params; needs a workspace)</span>
+            <span className="text-low">
+              (asks Claude to pick a procedure + params; needs a workspace)
+            </span>
           </span>
           <textarea
             value={goal}
@@ -204,15 +222,17 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
           >
             {planMutation.isPending ? 'Planning…' : 'Plan'}
           </button>
-          {!planNote && !planMutation.error && (!goal.trim() || !workspaceId) && (
-            <span className="text-xs text-low">
-              {!goal.trim()
-                ? 'Enter a goal'
-                : 'Pick a workspace below first'}
-            </span>
-          )}
+          {!planNote &&
+            !planMutation.error &&
+            (!goal.trim() || !workspaceId) && (
+              <span className="text-xs text-low">
+                {!goal.trim() ? 'Enter a goal' : 'Pick a workspace below first'}
+              </span>
+            )}
           {planNote && !planMutation.error && (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400">{planNote}</span>
+            <span className="text-xs text-emerald-600 dark:text-emerald-400">
+              {planNote}
+            </span>
           )}
           {planMutation.error && (
             <span className="text-xs text-rose-500">
@@ -291,7 +311,10 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
                 type="text"
                 value={paramValues[p.name] ?? ''}
                 onChange={(e) =>
-                  setParamValues((prev) => ({ ...prev, [p.name]: e.target.value }))
+                  setParamValues((prev) => ({
+                    ...prev,
+                    [p.name]: e.target.value,
+                  }))
                 }
                 placeholder={p.description ?? ''}
                 className="rounded border bg-transparent px-2 py-1.5 text-sm"
@@ -387,7 +410,8 @@ function ProcedureRunsList() {
           {projectId ? (
             <>
               {' '}
-              (project <span className="font-mono">{projectId.slice(0, 8)}</span>{' '}
+              (project{' '}
+              <span className="font-mono">{projectId.slice(0, 8)}</span>{' '}
               <Link
                 to="/procedure-runs"
                 search={{}}
@@ -424,7 +448,10 @@ function ProcedureRunsList() {
             </thead>
             <tbody>
               {runs.map((run) => (
-                <tr key={run.id} className="border-t hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50">
+                <tr
+                  key={run.id}
+                  className="border-t hover:bg-zinc-50/50 dark:hover:bg-zinc-900/50"
+                >
                   <td className="px-3 py-2">
                     <Link
                       to="/procedure-runs/$runId"
@@ -433,7 +460,9 @@ function ProcedureRunsList() {
                     >
                       {run.procedure_name}
                     </Link>
-                    <span className="ml-2 text-xs text-low">v{String(run.procedure_version)}</span>
+                    <span className="ml-2 text-xs text-low">
+                      v{String(run.procedure_version)}
+                    </span>
                   </td>
                   <td className="px-3 py-2">
                     <span
@@ -442,9 +471,15 @@ function ProcedureRunsList() {
                       {run.status}
                     </span>
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs">{run.current_state}</td>
-                  <td className="px-3 py-2 text-xs text-low">{formatTime(run.created_at)}</td>
-                  <td className="px-3 py-2 text-xs text-low">{formatTime(run.updated_at)}</td>
+                  <td className="px-3 py-2 font-mono text-xs">
+                    {run.current_state}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-low">
+                    {formatTime(run.created_at)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-low">
+                    {formatTime(run.updated_at)}
+                  </td>
                 </tr>
               ))}
             </tbody>

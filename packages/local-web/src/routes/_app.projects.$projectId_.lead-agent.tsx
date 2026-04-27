@@ -6,11 +6,7 @@ import {
   useParams,
 } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  leadAgentApi,
-  proceduresApi,
-  workspacesApi,
-} from '@/shared/lib/api';
+import { leadAgentApi, proceduresApi, workspacesApi } from '@/shared/lib/api';
 import type {
   LeadAgentSession,
   ProcedureSummary,
@@ -18,7 +14,9 @@ import type {
 } from 'shared/types';
 
 function LeadAgentPage() {
-  const { projectId } = useParams({ from: '/_app/projects/$projectId_/lead-agent' });
+  const { projectId } = useParams({
+    from: '/_app/projects/$projectId_/lead-agent',
+  });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -52,7 +50,9 @@ function LeadAgentPage() {
     mutationFn: () =>
       leadAgentApi.startSession(projectId, { workspace_id: workspaceId }),
     onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ['lead-agent-session', projectId] });
+      queryClient.invalidateQueries({
+        queryKey: ['lead-agent-session', projectId],
+      });
       navigate({
         to: '/workspaces/$workspaceId',
         params: { workspaceId: session.workspace_id },
@@ -71,9 +71,9 @@ function LeadAgentPage() {
       <header>
         <h1 className="text-xl font-semibold">Project lead agent</h1>
         <p className="text-sm text-low mt-1">
-          A persistent Claude session that manages this project's procedures
-          and runs. It auto-saves any procedures it authors and briefs you in
-          plain English — you don't need to read YAML.
+          A persistent Claude session that manages this project's procedures and
+          runs. It auto-saves any procedures it authors and briefs you in plain
+          English — you don't need to read YAML.
         </p>
       </header>
 
@@ -107,9 +107,8 @@ function LeadAgentPage() {
           <div className="text-sm font-medium mb-1">No agent yet</div>
           <p className="text-xs text-low mb-3">
             Pick a workspace where the agent will live. The agent runs as a
-            normal VK Claude session in that workspace, so it'll show up in
-            the workspace's session list. You only need to do this once per
-            project.
+            normal VK Claude session in that workspace, so it'll show up in the
+            workspace's session list. You only need to do this once per project.
           </p>
           <label className="flex flex-col gap-1 text-xs mb-3">
             <span className="text-low">Workspace</span>

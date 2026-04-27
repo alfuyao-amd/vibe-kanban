@@ -32,6 +32,22 @@ impl ProjectLeadAgent {
             .await
     }
 
+    /// Look up the lead-agent record for a given session. Returns `None` for
+    /// sessions that are not project-lead-agent sessions.
+    pub async fn find_by_session_id(
+        pool: &SqlitePool,
+        session_id: Uuid,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        let query = format!(
+            r#"SELECT {cols} FROM project_lead_agents WHERE session_id = ?"#,
+            cols = Self::COLUMNS
+        );
+        sqlx::query_as::<_, Self>(&query)
+            .bind(session_id)
+            .fetch_optional(pool)
+            .await
+    }
+
     pub async fn upsert(
         pool: &SqlitePool,
         project_id: Uuid,

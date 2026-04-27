@@ -187,6 +187,7 @@ impl McpServer {
                 agent_id: None,
                 reasoning_id: None,
                 permission_policy: None,
+                mcp_config_paths: None,
             },
             prompt: workspace_prompt,
             attachment_ids: None,

@@ -603,7 +603,13 @@ reasoning_id?: string | null,
 /**
  * Permission policy override
  */
-permission_policy?: PermissionPolicy | null, };
+permission_policy?: PermissionPolicy | null, 
+/**
+ * Extra MCP server config files to attach for this spawn.
+ * Currently consumed by ClaudeCode (translated into `--mcp-config <path>` args).
+ * Files must already exist on disk; the executor only reads them.
+ */
+mcp_config_paths?: Array<string> | null, };
 
 export type ScriptContext = "SetupScript" | "CleanupScript" | "ArchiveScript" | "DevServer" | "ToolInstallScript";
 

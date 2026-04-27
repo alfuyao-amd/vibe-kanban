@@ -392,11 +392,16 @@ impl VkApiBackend {
     /// Like `create_session` but also returns the `ExecutionOutput` for the
     /// initial follow-up. The lead-agent planner needs the model's response
     /// (not just the session id) to decide which procedure to run.
+    ///
+    /// `mcp_config_paths` is forwarded into the executor config so the spawned
+    /// agent loads extra MCP servers (used for the project lead agent so it
+    /// gets the project-orchestrator MCP attached on its very first turn).
     pub async fn create_session_with_output(
         &self,
         executor: &str,
         prompt: &str,
         workspace_id: Uuid,
+        mcp_config_paths: Option<Vec<String>>,
     ) -> Result<(SessionId, ExecutionOutput), BackendError> {
         let create_url = self.url("/api/sessions");
         let resp = self
@@ -413,13 +418,16 @@ impl VkApiBackend {
         let session: SessionView =
             Self::unwrap_envelope(resp, &format!("POST {create_url}")).await?;
 
+        let mut executor_config = Self::build_executor_config(executor)?;
+        executor_config.mcp_config_paths = mcp_config_paths;
+
         let followup_url = self.url(&format!("/api/sessions/{}/follow-up", session.id));
         let followup_resp = self
             .client
             .post(&followup_url)
             .json(&FollowUpBody {
                 prompt: prompt.to_string(),
-                executor_config: Self::build_executor_config(executor)?,
+                executor_config,
             })
             .send()
             .await
