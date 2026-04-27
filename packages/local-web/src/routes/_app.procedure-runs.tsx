@@ -370,7 +370,18 @@ function ProcedureRunsList() {
   return (
     <div className="flex flex-col p-6 gap-4">
       <header>
-        <h1 className="text-xl font-semibold">Procedure runs</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">Procedure runs</h1>
+          {projectId && (
+            <Link
+              to="/projects/$projectId/lead-agent"
+              params={{ projectId }}
+              className="rounded border border-blue-600 text-blue-600 hover:bg-blue-600/10 text-xs px-3 py-1.5"
+            >
+              Open lead agent →
+            </Link>
+          )}
+        </div>
         <p className="text-sm text-low mt-1">
           Lead Agent procedure executions
           {projectId ? (

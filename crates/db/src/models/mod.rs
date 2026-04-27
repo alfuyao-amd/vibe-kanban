@@ -7,6 +7,7 @@ pub mod merge;
 pub mod procedure;
 pub mod procedure_run;
 pub mod project;
+pub mod project_lead_agent;
 pub mod pull_request;
 pub mod repo;
 pub mod requests;

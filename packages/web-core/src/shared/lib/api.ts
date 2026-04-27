@@ -106,6 +106,8 @@ import {
   Project,
   PickedPlan,
   PlanRequest,
+  LeadAgentSession,
+  StartLeadAgentRequest,
 } from 'shared/types';
 import type { Project as RemoteProject } from 'shared/remote-types';
 import type { WorkspaceWithSession } from '@/shared/types/attempt';
@@ -1082,6 +1084,27 @@ export const leadAgentApi = {
       }
     );
     return handleApiResponse<PickedPlan>(response);
+  },
+
+  getSession: async (projectId: string): Promise<LeadAgentSession | null> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/lead-agent`
+    );
+    return handleApiResponse<LeadAgentSession | null>(response);
+  },
+
+  startSession: async (
+    projectId: string,
+    body: StartLeadAgentRequest
+  ): Promise<LeadAgentSession> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/lead-agent`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+    return handleApiResponse<LeadAgentSession>(response);
   },
 };
 

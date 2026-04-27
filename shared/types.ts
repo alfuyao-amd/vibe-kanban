@@ -48,12 +48,28 @@ export type StartProcedureRequest = { procedure_name: string, params: Record<str
 
 export type PlanRequest = { goal: string, workspace_id: string, };
 
+export type StartLeadAgentRequest = { workspace_id: string, };
+
 export type PickedPlan = { procedure_name: string, params: Record<string, unknown>, 
 /**
  * The raw assistant message; useful for surfacing reasoning to the user
  * when the JSON the planner returned is missing fields.
  */
 raw_assistant_message: string | null, };
+
+export type LeadAgentSession = { project_id: string, session_id: string, workspace_id: string, };
+
+export type UpsertProcedureRequest = { yaml: string, 
+/**
+ * Either `user` or `lead_agent`. Defaults to `user`.
+ */
+source: string | null, };
+
+export type ProcedureRecord = { id: string, project_id: string, name: string, version: bigint, yaml: string, source: string, created_at: Date, updated_at: Date, };
+
+export type ProcedureSource = "user" | "lead_agent";
+
+export type ProjectLeadAgent = { project_id: string, session_id: string, workspace_id: string, created_at: Date, updated_at: Date, };
 
 export type DraftFollowUpData = { message: string, executor_config: ExecutorConfig, };
 
