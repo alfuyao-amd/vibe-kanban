@@ -40,11 +40,26 @@ export type StateOutcome = "success" | "failure" | "cancelled";
 
 export type CreateProcedureRun = { procedure_name: string, procedure_version: bigint, initial_state: string, params: Record<string, unknown>, workspace_id: string | null, };
 
-export type ProcedureSummary = { name: string, version: number, description: string, initial_state: string, match_hints: Array<string>, params: Array<ProcedureParamSummary>, };
+export type ProcedureSummary = { name: string, version: number, description: string, initial_state: string, match_hints: Array<string>, params: Array<ProcedureParamSummary>, 
+/**
+ * Where this procedure came from. Built-ins are immutable from the UI's
+ * perspective; project-local rows (`user`/`lead_agent`) can be edited or
+ * deleted.
+ */
+source: ProcedureSourceLabel, };
+
+export type ProcedureSourceLabel = "builtin" | "user" | "lead_agent";
 
 export type ProcedureParamSummary = { name: string, type: string, required: boolean, description: string | null, };
 
 export type StartProcedureRequest = { procedure_name: string, params: Record<string, unknown>, workspace_id: string | null, };
+
+export type ProcedureSourceView = { name: string, yaml: string, source: ProcedureSourceLabel, 
+/**
+ * True when this procedure is bundled with the binary and cannot be
+ * edited or deleted via the API. UIs should disable Save/Delete.
+ */
+read_only: boolean, };
 
 export type PlanRequest = { goal: string, workspace_id: string, };
 

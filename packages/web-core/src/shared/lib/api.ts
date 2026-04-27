@@ -101,6 +101,7 @@ import {
   OpenRemoteEditorResponse,
   ProfileResponse,
   ProcedureRun,
+  ProcedureSourceView,
   ProcedureSummary,
   StartProcedureRequest,
   Project,
@@ -1127,6 +1128,16 @@ export const proceduresApi = {
       }
     );
     return handleApiResponse<unknown>(response);
+  },
+
+  getProcedureSource: async (
+    projectId: string,
+    name: string
+  ): Promise<ProcedureSourceView> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/procedures/${encodeURIComponent(name)}`
+    );
+    return handleApiResponse<ProcedureSourceView>(response);
   },
 
   deleteProcedure: async (projectId: string, name: string): Promise<void> => {

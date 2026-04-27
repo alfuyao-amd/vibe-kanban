@@ -141,9 +141,18 @@ function LeadAgentPage() {
       )}
 
       <section>
-        <h2 className="text-sm font-medium mb-2">
-          Procedures available to this project
-        </h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-medium">
+            Procedures available to this project
+          </h2>
+          <Link
+            to="/projects/$projectId/procedures"
+            params={{ projectId }}
+            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+          >
+            Edit procedures →
+          </Link>
+        </div>
         {proceduresQuery.isLoading ? (
           <div className="text-sm text-low">Loading…</div>
         ) : (

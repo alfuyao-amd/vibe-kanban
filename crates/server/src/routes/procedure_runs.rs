@@ -27,6 +27,19 @@ pub struct ProcedureSummary {
     pub initial_state: String,
     pub match_hints: Vec<String>,
     pub params: Vec<ProcedureParamSummary>,
+    /// Where this procedure came from. Built-ins are immutable from the UI's
+    /// perspective; project-local rows (`user`/`lead_agent`) can be edited or
+    /// deleted.
+    pub source: ProcedureSourceLabel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum ProcedureSourceLabel {
+    Builtin,
+    User,
+    LeadAgent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -38,8 +51,8 @@ pub struct ProcedureParamSummary {
     pub description: Option<String>,
 }
 
-impl From<&Procedure> for ProcedureSummary {
-    fn from(p: &Procedure) -> Self {
+impl ProcedureSummary {
+    pub fn from_procedure(p: &Procedure, source: ProcedureSourceLabel) -> Self {
         let params = p
             .triggers
             .params
@@ -58,6 +71,7 @@ impl From<&Procedure> for ProcedureSummary {
             initial_state: p.initial_state.clone(),
             match_hints: p.triggers.match_hints.clone(),
             params,
+            source,
         }
     }
 }
@@ -74,7 +88,10 @@ pub async fn list_procedures() -> Result<ResponseJson<ApiResponse<Vec<ProcedureS
 {
     let procedures = orchestration::builtin_procedures()
         .map_err(|e| ApiError::BadRequest(format!("failed to load procedures: {e}")))?;
-    let summaries = procedures.iter().map(ProcedureSummary::from).collect();
+    let summaries = procedures
+        .iter()
+        .map(|p| ProcedureSummary::from_procedure(p, ProcedureSourceLabel::Builtin))
+        .collect();
     Ok(ResponseJson(ApiResponse::success(summaries)))
 }
 

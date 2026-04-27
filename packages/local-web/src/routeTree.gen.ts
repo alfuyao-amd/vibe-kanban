@@ -23,6 +23,7 @@ import { Route as AppWorkspacesCreateRouteImport } from './routes/_app.workspace
 import { Route as AppWorkspacesWorkspaceIdRouteImport } from './routes/_app.workspaces_.$workspaceId'
 import { Route as AppProjectsProjectIdRouteImport } from './routes/_app.projects.$projectId'
 import { Route as AppProcedureRunsRunIdRouteImport } from './routes/_app.procedure-runs_.$runId'
+import { Route as AppProjectsProjectIdProceduresRouteImport } from './routes/_app.projects.$projectId_.procedures'
 import { Route as AppProjectsProjectIdLeadAgentRouteImport } from './routes/_app.projects.$projectId_.lead-agent'
 import { Route as AppHostsHostIdWorkspacesRouteImport } from './routes/_app.hosts.$hostId.workspaces'
 import { Route as HostsHostIdWorkspacesWorkspaceIdVscodeRouteImport } from './routes/hosts.$hostId.workspaces.$workspaceId.vscode'
@@ -108,6 +109,12 @@ const AppProcedureRunsRunIdRoute = AppProcedureRunsRunIdRouteImport.update({
   path: '/procedure-runs/$runId',
   getParentRoute: () => AppRoute,
 } as any)
+const AppProjectsProjectIdProceduresRoute =
+  AppProjectsProjectIdProceduresRouteImport.update({
+    id: '/projects/$projectId_/procedures',
+    path: '/projects/$projectId/procedures',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppProjectsProjectIdLeadAgentRoute =
   AppProjectsProjectIdLeadAgentRouteImport.update({
     id: '/projects/$projectId_/lead-agent',
@@ -201,6 +208,7 @@ export interface FileRoutesByFullPath {
   '/workspaces/$workspaceId/vscode': typeof WorkspacesWorkspaceIdVscodeRoute
   '/hosts/$hostId/workspaces': typeof AppHostsHostIdWorkspacesRoute
   '/projects/$projectId/lead-agent': typeof AppProjectsProjectIdLeadAgentRoute
+  '/projects/$projectId/procedures': typeof AppProjectsProjectIdProceduresRoute
   '/hosts/$hostId/workspaces/$workspaceId': typeof AppHostsHostIdWorkspacesWorkspaceIdRoute
   '/hosts/$hostId/workspaces/create': typeof AppHostsHostIdWorkspacesCreateRoute
   '/projects/$projectId/issues/$issueId': typeof AppProjectsProjectIdIssuesIssueIdRoute
@@ -228,6 +236,7 @@ export interface FileRoutesByTo {
   '/workspaces/$workspaceId/vscode': typeof WorkspacesWorkspaceIdVscodeRoute
   '/hosts/$hostId/workspaces': typeof AppHostsHostIdWorkspacesRoute
   '/projects/$projectId/lead-agent': typeof AppProjectsProjectIdLeadAgentRoute
+  '/projects/$projectId/procedures': typeof AppProjectsProjectIdProceduresRoute
   '/hosts/$hostId/workspaces/$workspaceId': typeof AppHostsHostIdWorkspacesWorkspaceIdRoute
   '/hosts/$hostId/workspaces/create': typeof AppHostsHostIdWorkspacesCreateRoute
   '/projects/$projectId/issues/$issueId': typeof AppProjectsProjectIdIssuesIssueIdRoute
@@ -257,6 +266,7 @@ export interface FileRoutesById {
   '/workspaces/$workspaceId/vscode': typeof WorkspacesWorkspaceIdVscodeRoute
   '/_app/hosts/$hostId/workspaces': typeof AppHostsHostIdWorkspacesRoute
   '/_app/projects/$projectId_/lead-agent': typeof AppProjectsProjectIdLeadAgentRoute
+  '/_app/projects/$projectId_/procedures': typeof AppProjectsProjectIdProceduresRoute
   '/_app/hosts/$hostId/workspaces_/$workspaceId': typeof AppHostsHostIdWorkspacesWorkspaceIdRoute
   '/_app/hosts/$hostId/workspaces_/create': typeof AppHostsHostIdWorkspacesCreateRoute
   '/_app/projects/$projectId_/issues/$issueId': typeof AppProjectsProjectIdIssuesIssueIdRoute
@@ -286,6 +296,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId/vscode'
     | '/hosts/$hostId/workspaces'
     | '/projects/$projectId/lead-agent'
+    | '/projects/$projectId/procedures'
     | '/hosts/$hostId/workspaces/$workspaceId'
     | '/hosts/$hostId/workspaces/create'
     | '/projects/$projectId/issues/$issueId'
@@ -313,6 +324,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId/vscode'
     | '/hosts/$hostId/workspaces'
     | '/projects/$projectId/lead-agent'
+    | '/projects/$projectId/procedures'
     | '/hosts/$hostId/workspaces/$workspaceId'
     | '/hosts/$hostId/workspaces/create'
     | '/projects/$projectId/issues/$issueId'
@@ -341,6 +353,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId/vscode'
     | '/_app/hosts/$hostId/workspaces'
     | '/_app/projects/$projectId_/lead-agent'
+    | '/_app/projects/$projectId_/procedures'
     | '/_app/hosts/$hostId/workspaces_/$workspaceId'
     | '/_app/hosts/$hostId/workspaces_/create'
     | '/_app/projects/$projectId_/issues/$issueId'
@@ -462,6 +475,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppProcedureRunsRunIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/projects/$projectId_/procedures': {
+      id: '/_app/projects/$projectId_/procedures'
+      path: '/projects/$projectId/procedures'
+      fullPath: '/projects/$projectId/procedures'
+      preLoaderRoute: typeof AppProjectsProjectIdProceduresRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/projects/$projectId_/lead-agent': {
       id: '/_app/projects/$projectId_/lead-agent'
       path: '/projects/$projectId/lead-agent'
@@ -561,6 +581,7 @@ interface AppRouteChildren {
   AppWorkspacesElectricTestRoute: typeof AppWorkspacesElectricTestRoute
   AppHostsHostIdWorkspacesRoute: typeof AppHostsHostIdWorkspacesRoute
   AppProjectsProjectIdLeadAgentRoute: typeof AppProjectsProjectIdLeadAgentRoute
+  AppProjectsProjectIdProceduresRoute: typeof AppProjectsProjectIdProceduresRoute
   AppHostsHostIdWorkspacesWorkspaceIdRoute: typeof AppHostsHostIdWorkspacesWorkspaceIdRoute
   AppHostsHostIdWorkspacesCreateRoute: typeof AppHostsHostIdWorkspacesCreateRoute
   AppProjectsProjectIdIssuesIssueIdRoute: typeof AppProjectsProjectIdIssuesIssueIdRoute
@@ -584,6 +605,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppWorkspacesElectricTestRoute: AppWorkspacesElectricTestRoute,
   AppHostsHostIdWorkspacesRoute: AppHostsHostIdWorkspacesRoute,
   AppProjectsProjectIdLeadAgentRoute: AppProjectsProjectIdLeadAgentRoute,
+  AppProjectsProjectIdProceduresRoute: AppProjectsProjectIdProceduresRoute,
   AppHostsHostIdWorkspacesWorkspaceIdRoute:
     AppHostsHostIdWorkspacesWorkspaceIdRoute,
   AppHostsHostIdWorkspacesCreateRoute: AppHostsHostIdWorkspacesCreateRoute,
