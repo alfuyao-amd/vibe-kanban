@@ -1,7 +1,26 @@
-import { createFileRoute, Link } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
-import { proceduresApi } from '@/shared/lib/api';
-import type { ProcedureRun } from 'shared/types';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+} from '@tanstack/react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
+import {
+  proceduresApi,
+  projectsApi,
+  workspacesApi,
+} from '@/shared/lib/api';
+import type {
+  ProcedureRun,
+  ProcedureSummary,
+  Project,
+  Workspace,
+} from 'shared/types';
+
+const searchSchema = z.object({
+  projectId: z.string().uuid().optional(),
+});
 
 function statusBadgeClass(status: string): string {
   switch (status) {
@@ -25,10 +44,217 @@ function formatTime(value: string | Date): string {
   return d.toLocaleString();
 }
 
+function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+
+  const projectsQuery = useQuery<Project[]>({
+    queryKey: ['projects'],
+    queryFn: () => projectsApi.list(),
+  });
+  const proceduresQuery = useQuery<ProcedureSummary[]>({
+    queryKey: ['procedures'],
+    queryFn: () => proceduresApi.listDefinitions(),
+  });
+  const workspacesQuery = useQuery<Workspace[]>({
+    queryKey: ['workspaces-all'],
+    queryFn: () => workspacesApi.getAllWorkspaces(),
+  });
+
+  const [projectId, setProjectId] = useState<string>(defaultProjectId ?? '');
+  const [procedureName, setProcedureName] = useState<string>('');
+  const [workspaceId, setWorkspaceId] = useState<string>('');
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+
+  // Auto-select sensible defaults once data loads.
+  useEffect(() => {
+    if (!projectId && projectsQuery.data && projectsQuery.data.length > 0) {
+      setProjectId(projectsQuery.data[0].id);
+    }
+  }, [projectId, projectsQuery.data]);
+  useEffect(() => {
+    if (!procedureName && proceduresQuery.data && proceduresQuery.data.length > 0) {
+      setProcedureName(proceduresQuery.data[0].name);
+    }
+  }, [procedureName, proceduresQuery.data]);
+
+  const procedure = useMemo(
+    () => proceduresQuery.data?.find((p) => p.name === procedureName),
+    [proceduresQuery.data, procedureName]
+  );
+
+  // Reset param values when procedure changes.
+  useEffect(() => {
+    setParamValues({});
+  }, [procedureName]);
+
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      if (!procedure) throw new Error('procedure is required');
+      if (!projectId) throw new Error('project is required');
+      const params: Record<string, unknown> = {};
+      for (const p of procedure.params) {
+        const raw = paramValues[p.name] ?? '';
+        if (raw === '' && !p.required) continue;
+        if (raw === '' && p.required) {
+          throw new Error(`param "${p.name}" is required`);
+        }
+        params[p.name] = coerceParam(raw, p.type);
+      }
+      return proceduresApi.startRun(projectId, {
+        procedure_name: procedure.name,
+        params,
+        workspace_id: workspaceId || null,
+      });
+    },
+    onSuccess: (run) => {
+      queryClient.invalidateQueries({ queryKey: ['procedure-runs'] });
+      navigate({ to: '/procedure-runs/$runId', params: { runId: run.id } });
+    },
+  });
+
+  if (projectsQuery.isLoading || proceduresQuery.isLoading || workspacesQuery.isLoading) {
+    return (
+      <div className="rounded border p-4 text-sm text-low">Loading form…</div>
+    );
+  }
+
+  const projects = projectsQuery.data ?? [];
+  const procedures = proceduresQuery.data ?? [];
+  const workspaces = workspacesQuery.data ?? [];
+
+  return (
+    <div className="rounded border p-4">
+      <h2 className="text-sm font-medium mb-3">Start a procedure run</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-low">Project</span>
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            className="rounded border bg-transparent px-2 py-1.5 text-sm"
+          >
+            <option value="">— pick a project —</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-low">Procedure</span>
+          <select
+            value={procedureName}
+            onChange={(e) => setProcedureName(e.target.value)}
+            className="rounded border bg-transparent px-2 py-1.5 text-sm"
+          >
+            <option value="">— pick a procedure —</option>
+            {procedures.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name} (v{p.version})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-low">
+            Workspace <span className="text-low">(optional)</span>
+          </span>
+          <select
+            value={workspaceId}
+            onChange={(e) => setWorkspaceId(e.target.value)}
+            className="rounded border bg-transparent px-2 py-1.5 text-sm"
+          >
+            <option value="">— none —</option>
+            {workspaces.map((w) => (
+              <option key={w.id} value={w.id}>
+                {w.name ?? w.branch} ({w.id.slice(0, 8)})
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {procedure && procedure.description && (
+        <p className="text-xs text-low mb-3 whitespace-pre-line">
+          {procedure.description}
+        </p>
+      )}
+
+      {procedure && procedure.params.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+          {procedure.params.map((p) => (
+            <label key={p.name} className="flex flex-col gap-1 text-xs">
+              <span className="text-low">
+                {p.name}
+                <span className="ml-1 font-mono text-low">({p.type})</span>
+                {p.required && <span className="text-rose-500"> *</span>}
+              </span>
+              <input
+                type="text"
+                value={paramValues[p.name] ?? ''}
+                onChange={(e) =>
+                  setParamValues((prev) => ({ ...prev, [p.name]: e.target.value }))
+                }
+                placeholder={p.description ?? ''}
+                className="rounded border bg-transparent px-2 py-1.5 text-sm"
+              />
+              {p.description && (
+                <span className="text-low">{p.description}</span>
+              )}
+            </label>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => startMutation.mutate()}
+          disabled={!projectId || !procedure || startMutation.isPending}
+          className="rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-4 py-1.5"
+        >
+          {startMutation.isPending ? 'Starting…' : 'Start run'}
+        </button>
+        {startMutation.error && (
+          <span className="text-xs text-rose-500">
+            {(startMutation.error as Error).message}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function coerceParam(raw: string, ty: string): unknown {
+  switch (ty) {
+    case 'integer': {
+      const n = parseInt(raw, 10);
+      return Number.isNaN(n) ? raw : n;
+    }
+    case 'boolean':
+      return raw.toLowerCase() === 'true' || raw === '1';
+    case 'array':
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw.split(',').map((s) => s.trim());
+      }
+    case 'string':
+    default:
+      return raw;
+  }
+}
+
 function ProcedureRunsList() {
+  const { projectId } = Route.useSearch();
+
   const { data, isLoading, error } = useQuery<ProcedureRun[]>({
-    queryKey: ['procedure-runs'],
-    queryFn: () => proceduresApi.listAllRuns(),
+    queryKey: ['procedure-runs', projectId ?? 'all'],
+    queryFn: () =>
+      projectId
+        ? proceduresApi.listRunsForProject(projectId)
+        : proceduresApi.listAllRuns(),
     refetchInterval: 3000,
   });
 
@@ -50,16 +276,32 @@ function ProcedureRunsList() {
       <header>
         <h1 className="text-xl font-semibold">Procedure runs</h1>
         <p className="text-sm text-low mt-1">
-          Lead Agent procedure executions. Polls every 3s.
+          Lead Agent procedure executions
+          {projectId ? (
+            <>
+              {' '}
+              (project <span className="font-mono">{projectId.slice(0, 8)}</span>{' '}
+              <Link
+                to="/procedure-runs"
+                search={{}}
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                clear filter
+              </Link>
+              )
+            </>
+          ) : (
+            ' across all projects'
+          )}
+          . Polls every 3s.
         </p>
       </header>
 
+      <StartProcedureForm defaultProjectId={projectId} />
+
       {runs.length === 0 ? (
         <div className="rounded border border-dashed p-8 text-center text-sm text-low">
-          No procedure runs yet. Start one via the API:
-          <pre className="mt-3 inline-block text-xs text-left bg-zinc-100 dark:bg-zinc-900 rounded px-3 py-2">
-            POST /api/projects/{'{project_id}'}/procedure-runs
-          </pre>
+          No procedure runs yet.
         </div>
       ) : (
         <div className="overflow-x-auto rounded border">
@@ -107,5 +349,6 @@ function ProcedureRunsList() {
 }
 
 export const Route = createFileRoute('/_app/procedure-runs')({
+  validateSearch: searchSchema,
   component: ProcedureRunsList,
 });

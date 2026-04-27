@@ -13,6 +13,7 @@ import {
   KanbanIcon,
   SpinnerIcon,
   StarIcon,
+  PlayCircleIcon,
   type Icon,
 } from '@phosphor-icons/react';
 import { cn } from '../lib/cn';
@@ -51,6 +52,9 @@ interface AppBarProps {
   onCreateProject: () => void;
   onExportClick?: () => void;
   onWorkspacesClick: () => void;
+  onProcedureRunsClick?: () => void;
+  isProcedureRunsActive?: boolean;
+  showProcedureRunsButton?: boolean;
   onHostClick?: (hostId: string, status: AppBarHostStatus) => void;
   showWorkspacesButton?: boolean;
   onProjectClick: (projectId: string) => void;
@@ -203,6 +207,9 @@ export function AppBar({
   onCreateProject,
   onExportClick,
   onWorkspacesClick,
+  onProcedureRunsClick,
+  isProcedureRunsActive = false,
+  showProcedureRunsButton = true,
   onHostClick,
   showWorkspacesButton = true,
   onProjectClick,
@@ -230,19 +237,30 @@ export function AppBar({
   const sections: AppBarSection[] = [];
 
   if (showWorkspacesButton) {
+    const localItems: AppBarSection['items'] = [
+      {
+        key: 'local-workspaces',
+        kind: 'icon-button',
+        label: 'Local workspaces',
+        icon: LayoutIcon,
+        isActive: isWorkspacesActive,
+        onClick: onWorkspacesClick,
+      },
+    ];
+    if (showProcedureRunsButton && onProcedureRunsClick) {
+      localItems.push({
+        key: 'local-procedure-runs',
+        kind: 'icon-button',
+        label: 'Procedure runs',
+        icon: PlayCircleIcon,
+        isActive: isProcedureRunsActive,
+        onClick: onProcedureRunsClick,
+      });
+    }
     sections.push({
       key: 'local',
       label: 'Local',
-      items: [
-        {
-          key: 'local-workspaces',
-          kind: 'icon-button',
-          label: 'Local workspaces',
-          icon: LayoutIcon,
-          isActive: isWorkspacesActive,
-          onClick: onWorkspacesClick,
-        },
-      ],
+      items: localItems,
     });
   }
 

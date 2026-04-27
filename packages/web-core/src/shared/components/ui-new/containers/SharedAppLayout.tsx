@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DropResult } from '@hello-pangea/dnd';
-import { Outlet, useNavigate, useParams } from '@tanstack/react-router';
+import { Outlet, useLocation, useNavigate, useParams } from '@tanstack/react-router';
 import { siDiscord, siGithub } from 'simple-icons';
 import {
   XIcon,
@@ -173,6 +173,7 @@ export function SharedAppLayout() {
   );
   const isWorkspacesActive = isLocalWorkspacesDestination(currentDestination);
   const isExportActive = currentDestination?.kind === 'export';
+  const isProcedureRunsActive = useLocation().pathname.startsWith('/procedure-runs');
   const showCloudShutdownBanner =
     isExportActive || (isSignedIn && isProjectDestination(currentDestination));
   const isWorkspaceSidebarPreviewEnabled =
@@ -198,6 +199,11 @@ export function SharedAppLayout() {
   const handleWorkspacesClick = useCallback(() => {
     void navigate({ to: '/workspaces' });
   }, [navigate]);
+
+  const handleProcedureRunsClick = useCallback(() => {
+    const search = activeProjectId ? { projectId: activeProjectId } : {};
+    void navigate({ to: '/procedure-runs', search });
+  }, [navigate, activeProjectId]);
 
   const handleExportClick = useCallback(() => {
     appNavigation.goToExport();
@@ -337,6 +343,8 @@ export function SharedAppLayout() {
               onCreateProject={handleCreateProject}
               onExportClick={handleExportClick}
               onWorkspacesClick={handleWorkspacesClick}
+              onProcedureRunsClick={handleProcedureRunsClick}
+              isProcedureRunsActive={isProcedureRunsActive}
               onHostClick={handleHostClick}
               onPairHostClick={handlePairHostClick}
               onProjectClick={handleProjectClick}

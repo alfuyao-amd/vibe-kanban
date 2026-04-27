@@ -103,6 +103,7 @@ import {
   ProcedureRun,
   ProcedureSummary,
   StartProcedureRequest,
+  Project,
 } from 'shared/types';
 import type { Project as RemoteProject } from 'shared/remote-types';
 import type { WorkspaceWithSession } from '@/shared/types/attempt';
@@ -1056,6 +1057,13 @@ export const tagsApi = {
       method: 'DELETE',
     });
     return handleApiResponse<void>(response);
+  },
+};
+
+export const projectsApi = {
+  list: async (): Promise<Project[]> => {
+    const response = await makeRequest('/api/projects');
+    return handleApiResponse<Project[]>(response);
   },
 };
 

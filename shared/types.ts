@@ -40,7 +40,9 @@ export type StateOutcome = "success" | "failure" | "cancelled";
 
 export type CreateProcedureRun = { procedure_name: string, procedure_version: bigint, initial_state: string, params: Record<string, unknown>, workspace_id: string | null, };
 
-export type ProcedureSummary = { name: string, version: number, description: string, initial_state: string, };
+export type ProcedureSummary = { name: string, version: number, description: string, initial_state: string, match_hints: Array<string>, params: Array<ProcedureParamSummary>, };
+
+export type ProcedureParamSummary = { name: string, type: string, required: boolean, description: string | null, };
 
 export type StartProcedureRequest = { procedure_name: string, params: Record<string, unknown>, workspace_id: string | null, };
 

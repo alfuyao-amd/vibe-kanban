@@ -25,15 +25,39 @@ pub struct ProcedureSummary {
     pub version: u32,
     pub description: String,
     pub initial_state: String,
+    pub match_hints: Vec<String>,
+    pub params: Vec<ProcedureParamSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ProcedureParamSummary {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub ty: String,
+    pub required: bool,
+    pub description: Option<String>,
 }
 
 impl From<&Procedure> for ProcedureSummary {
     fn from(p: &Procedure) -> Self {
+        let params = p
+            .triggers
+            .params
+            .iter()
+            .map(|(name, spec)| ProcedureParamSummary {
+                name: name.clone(),
+                ty: format!("{:?}", spec.ty).to_lowercase(),
+                required: spec.required,
+                description: spec.description.clone(),
+            })
+            .collect();
         Self {
             name: p.name.clone(),
             version: p.version,
             description: p.description.clone(),
             initial_state: p.initial_state.clone(),
+            match_hints: p.triggers.match_hints.clone(),
+            params,
         }
     }
 }

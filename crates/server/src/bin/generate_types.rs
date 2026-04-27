@@ -28,6 +28,7 @@ fn generate_types_content() -> String {
         db::models::procedure_run::StateOutcome::decl(),
         db::models::procedure_run::CreateProcedureRun::decl(),
         server::routes::procedure_runs::ProcedureSummary::decl(),
+        server::routes::procedure_runs::ProcedureParamSummary::decl(),
         server::routes::procedure_runs::StartProcedureRequest::decl(),
         db::models::scratch::DraftFollowUpData::decl(),
         db::models::scratch::DraftWorkspaceData::decl(),
