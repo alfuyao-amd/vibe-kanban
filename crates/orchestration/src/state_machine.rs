@@ -662,6 +662,22 @@ fn render_action(action: &Action, context: &RunContext) -> RenderedAction {
     }
 }
 
+/// Render `{{ path | filter1 | filter2(arg) }}` against `context`.
+///
+/// The lookup is `path.to.field` over the JSON view (same as before).
+/// Supported filters (all stringify the result):
+/// - `default("x")` — fall back to the literal string `x` when the looked-up
+///   value is missing or null. Without a default, an unresolved placeholder
+///   is left in the template verbatim (back-compat).
+/// - `upper` / `lower` — ASCII case transforms.
+/// - `shell_quote` — POSIX-shell-quote the value (single-quotes, with `'\''`
+///   escapes). Use to interpolate into shell commands safely:
+///   `cd {{ workspace.worktree_path | shell_quote }} && {{ test_command }}`.
+/// - `json` — JSON-encode the value (handy for embedding into prompts).
+///
+/// Filters apply left-to-right. Unknown filters leave the placeholder
+/// untouched (with the verbatim template segment in the output) so a typo
+/// is visible rather than silent.
 pub fn render_template(template: &str, context: &Value) -> String {
     let mut out = String::with_capacity(template.len());
     let bytes = template.as_bytes();
@@ -673,14 +689,9 @@ pub fn render_template(template: &str, context: &Value) -> String {
             && let Some(end) = find_close(bytes, i + 2)
         {
             let raw = &template[i + 2..end];
-            let key = raw.trim();
-            match lookup_path(context, key) {
-                Some(value) => {
-                    out.push_str(&stringify(&value));
-                }
-                None => {
-                    out.push_str(&template[i..end + 2]);
-                }
+            match render_placeholder(raw, context) {
+                Some(rendered) => out.push_str(&rendered),
+                None => out.push_str(&template[i..end + 2]),
             }
             i = end + 2;
             continue;
@@ -688,6 +699,99 @@ pub fn render_template(template: &str, context: &Value) -> String {
         out.push(bytes[i] as char);
         i += 1;
     }
+    out
+}
+
+/// Resolve a single `{{ ... }}` body. Returns `None` to leave the placeholder
+/// verbatim in the output (unknown var without `default`, unknown filter, or
+/// malformed filter args).
+fn render_placeholder(raw: &str, context: &Value) -> Option<String> {
+    let mut parts = raw.split('|');
+    let path = parts.next()?.trim();
+    let filters: Vec<&str> = parts.map(str::trim).collect();
+
+    let mut current = lookup_path(context, path);
+
+    for filter in &filters {
+        let (name, args) = parse_filter(filter)?;
+        match name {
+            "default" => {
+                let fallback = args.first()?.clone();
+                if current.as_ref().is_none_or(Value::is_null) {
+                    current = Some(Value::String(fallback));
+                }
+            }
+            "upper" => {
+                let s = current.as_ref().map(stringify).unwrap_or_default();
+                current = Some(Value::String(s.to_uppercase()));
+            }
+            "lower" => {
+                let s = current.as_ref().map(stringify).unwrap_or_default();
+                current = Some(Value::String(s.to_lowercase()));
+            }
+            "shell_quote" => {
+                let s = current.as_ref().map(stringify).unwrap_or_default();
+                current = Some(Value::String(shell_quote(&s)));
+            }
+            "json" => {
+                let serialized = current
+                    .as_ref()
+                    .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "null".to_string()))
+                    .unwrap_or_else(|| "null".to_string());
+                current = Some(Value::String(serialized));
+            }
+            _ => return None,
+        }
+    }
+
+    current.map(|v| stringify(&v))
+}
+
+/// Parse a filter chunk like `default("x")`, `default('x')`, or `upper` into
+/// `(name, [args...])`. Returns `None` on malformed input so the renderer
+/// can leave the placeholder verbatim — typos shouldn't render as empty.
+fn parse_filter(raw: &str) -> Option<(&str, Vec<String>)> {
+    let raw = raw.trim();
+    let Some(open) = raw.find('(') else {
+        return Some((raw, Vec::new()));
+    };
+    if !raw.ends_with(')') {
+        return None;
+    }
+    let name = raw[..open].trim();
+    let inner = &raw[open + 1..raw.len() - 1];
+    let arg = parse_filter_arg(inner.trim())?;
+    Some((name, vec![arg]))
+}
+
+fn parse_filter_arg(raw: &str) -> Option<String> {
+    if raw.len() >= 2
+        && let Some(stripped) = raw
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .or_else(|| raw.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
+    {
+        return Some(stripped.to_string());
+    }
+    None
+}
+
+/// POSIX-style single-quote shell escape: `it's` → `'it'\''s'`. Empty input
+/// becomes `''` (a valid empty argument).
+fn shell_quote(s: &str) -> String {
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    for ch in s.chars() {
+        if ch == '\'' {
+            out.push_str("'\\''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
     out
 }
 
@@ -1232,6 +1336,78 @@ mod tests {
     fn template_handles_integer_values() {
         let ctx = json!({"n": 42});
         assert_eq!(render_template("x={{n}}", &ctx), "x=42");
+    }
+
+    #[test]
+    fn template_default_filter_fills_missing_var() {
+        let ctx = json!({});
+        assert_eq!(
+            render_template(r#"{{ name | default("anon") }}"#, &ctx),
+            "anon"
+        );
+    }
+
+    #[test]
+    fn template_default_filter_skipped_when_var_present() {
+        let ctx = json!({"name": "ada"});
+        assert_eq!(
+            render_template(r#"{{ name | default("anon") }}"#, &ctx),
+            "ada"
+        );
+    }
+
+    #[test]
+    fn template_default_filter_treats_explicit_null_as_absent() {
+        let ctx = json!({"name": null});
+        assert_eq!(
+            render_template(r#"{{ name | default("anon") }}"#, &ctx),
+            "anon"
+        );
+    }
+
+    #[test]
+    fn template_upper_lower_filters() {
+        let ctx = json!({"name": "Ada"});
+        assert_eq!(render_template("{{name | upper}}", &ctx), "ADA");
+        assert_eq!(render_template("{{name | lower}}", &ctx), "ada");
+    }
+
+    #[test]
+    fn template_shell_quote_escapes_single_quotes() {
+        let ctx = json!({"path": "/tmp/it's a path/file.txt"});
+        let out = render_template("cd {{ path | shell_quote }}", &ctx);
+        // Echo into bash and you get `/tmp/it's a path/file.txt` back.
+        assert_eq!(out, r#"cd '/tmp/it'\''s a path/file.txt'"#);
+    }
+
+    #[test]
+    fn template_shell_quote_handles_empty() {
+        let ctx = json!({"empty": ""});
+        assert_eq!(render_template("x={{empty | shell_quote}}", &ctx), "x=''");
+    }
+
+    #[test]
+    fn template_json_filter_serializes_object() {
+        let ctx = json!({"obj": {"a": 1}});
+        assert_eq!(render_template("{{obj | json}}", &ctx), r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn template_filters_chain_left_to_right() {
+        let ctx = json!({});
+        assert_eq!(
+            render_template(r#"{{ name | default("ada") | upper }}"#, &ctx),
+            "ADA"
+        );
+    }
+
+    #[test]
+    fn template_unknown_filter_leaves_placeholder_verbatim() {
+        let ctx = json!({"name": "ada"});
+        assert_eq!(
+            render_template("{{ name | bogus }}", &ctx),
+            "{{ name | bogus }}"
+        );
     }
 
     /// Backend whose `await_completion` blocks until cancelled, so we can

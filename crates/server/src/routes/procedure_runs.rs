@@ -108,8 +108,16 @@ pub async fn start_procedure_run(
                 ApiError::BadRequest(format!("unknown procedure `{}`", req.procedure_name))
             })?;
 
+    // Validate the user-supplied params against the procedure's declared
+    // trigger spec (and fill in declared defaults for missing optionals)
+    // BEFORE we add the synthesized workspace fields. That way validation
+    // errors are about the user's input, not server-injected fields.
+    let validated_params = procedure
+        .validate_and_fill_params(req.params.clone())
+        .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+
     let params =
-        enrich_params_with_workspace(req.params.clone(), &deployment, req.workspace_id).await;
+        enrich_params_with_workspace(validated_params, &deployment, req.workspace_id).await;
 
     let data = CreateProcedureRun {
         procedure_name: procedure.name.clone(),

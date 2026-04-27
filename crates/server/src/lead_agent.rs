@@ -278,7 +278,8 @@ pub async fn bootstrap_prompt(pool: &SqlitePool, project_id: Uuid) -> Result<Str
          description: <one paragraph>\n\
          triggers:\n  match_hints: [<short phrases users might say>]\n  params:\n    \
          <param_name>:\n      type: string|integer|boolean|array\n      \
-         required: true|false\n      description: <what this is for>\n\
+         required: true|false\n      description: <what this is for>\n      \
+         default: <optional fallback if absent; must match `type`>\n\
          initial_state: <name of first state>\n\
          states:\n  <state_name>:\n    action:\n      kind: \
          create_session|follow_up|start_review|merge\n      executor: \
@@ -298,7 +299,15 @@ pub async fn bootstrap_prompt(pool: &SqlitePool, project_id: Uuid) -> Result<Str
          - llm_judge gates parse the preceding action's last assistant \
          message as JSON and evaluate `pass_when` against `response.<path>`.\n\
          - For commands that need to run inside a workspace, prefix with \
-         `cd {{workspace.worktree_path}} && ...`.\n\n",
+         `cd {{workspace.worktree_path}} && ...`. Use the `shell_quote` \
+         filter for paths that may contain spaces: \
+         `cd {{ workspace.worktree_path | shell_quote }} && ...`.\n\
+         - Required params must be supplied at run start; missing ones reject \
+         with HTTP 400. Optional params can declare a `default` that's filled \
+         in automatically.\n\
+         - Available template filters: \
+         `default(\"x\")`, `upper`, `lower`, `shell_quote`, `json`. \
+         Chain with `|`, e.g. `{{ name | default(\"anon\") | upper }}`.\n\n",
     );
 
     if procedures.is_empty() {
