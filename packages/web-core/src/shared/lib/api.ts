@@ -104,6 +104,8 @@ import {
   ProcedureSummary,
   StartProcedureRequest,
   Project,
+  PickedPlan,
+  PlanRequest,
 } from 'shared/types';
 import type { Project as RemoteProject } from 'shared/remote-types';
 import type { WorkspaceWithSession } from '@/shared/types/attempt';
@@ -1067,10 +1069,56 @@ export const projectsApi = {
   },
 };
 
+export const leadAgentApi = {
+  plan: async (
+    projectId: string,
+    body: PlanRequest
+  ): Promise<PickedPlan> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/lead-agent/plan`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    );
+    return handleApiResponse<PickedPlan>(response);
+  },
+};
+
 export const proceduresApi = {
   listDefinitions: async (): Promise<ProcedureSummary[]> => {
     const response = await makeRequest('/api/procedures');
     return handleApiResponse<ProcedureSummary[]>(response);
+  },
+
+  listForProject: async (projectId: string): Promise<ProcedureSummary[]> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/procedures`
+    );
+    return handleApiResponse<ProcedureSummary[]>(response);
+  },
+
+  upsertProcedure: async (
+    projectId: string,
+    yaml: string,
+    source: 'user' | 'lead_agent' = 'user'
+  ): Promise<unknown> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/procedures`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ yaml, source }),
+      }
+    );
+    return handleApiResponse<unknown>(response);
+  },
+
+  deleteProcedure: async (projectId: string, name: string): Promise<void> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/procedures/${encodeURIComponent(name)}`,
+      { method: 'DELETE' }
+    );
+    return handleApiResponse<void>(response);
   },
 
   listAllRuns: async (): Promise<ProcedureRun[]> => {

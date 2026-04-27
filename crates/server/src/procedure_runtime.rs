@@ -388,6 +388,50 @@ impl VkApiBackend {
             .map_err(|e| BackendError::Generic(format!("unknown executor `{executor}`: {e}")))?;
         Ok(ExecutorConfig::new(base))
     }
+
+    /// Like `create_session` but also returns the `ExecutionOutput` for the
+    /// initial follow-up. The lead-agent planner needs the model's response
+    /// (not just the session id) to decide which procedure to run.
+    pub async fn create_session_with_output(
+        &self,
+        executor: &str,
+        prompt: &str,
+        workspace_id: Uuid,
+    ) -> Result<(SessionId, ExecutionOutput), BackendError> {
+        let create_url = self.url("/api/sessions");
+        let resp = self
+            .client
+            .post(&create_url)
+            .json(&CreateSessionBody {
+                workspace_id,
+                executor: Some(executor),
+                name: Some("lead-agent plan".to_string()),
+            })
+            .send()
+            .await
+            .map_err(|e| BackendError::Generic(format!("POST {create_url}: {e}")))?;
+        let session: SessionView =
+            Self::unwrap_envelope(resp, &format!("POST {create_url}")).await?;
+
+        let followup_url = self.url(&format!("/api/sessions/{}/follow-up", session.id));
+        let followup_resp = self
+            .client
+            .post(&followup_url)
+            .json(&FollowUpBody {
+                prompt: prompt.to_string(),
+                executor_config: Self::build_executor_config(executor)?,
+            })
+            .send()
+            .await
+            .map_err(|e| BackendError::Generic(format!("POST {followup_url}: {e}")))?;
+        let process: ExecProcView =
+            Self::unwrap_envelope(followup_resp, &format!("POST {followup_url}")).await?;
+
+        let output = self
+            .await_completion(ExecutionId(process.id.to_string()))
+            .await?;
+        Ok((SessionId(session.id.to_string()), output))
+    }
 }
 
 fn resolve_base_url() -> Result<String, String> {

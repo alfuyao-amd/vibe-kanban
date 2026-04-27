@@ -145,7 +145,7 @@ impl GateEvaluator for ContextLlmJudge {
     }
 }
 
-fn extract_json_object(text: &str) -> Option<Value> {
+pub fn extract_json_object(text: &str) -> Option<Value> {
     let trimmed = text.trim();
     if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
         return Some(v);

@@ -17,10 +17,12 @@ pub mod execution_processes;
 pub mod frontend;
 pub mod health;
 pub mod host_relay;
+pub mod lead_agent;
 pub mod oauth;
 pub mod organizations;
 pub mod preview;
 pub mod procedure_runs;
+pub mod procedures;
 pub mod projects;
 pub mod relay_auth;
 pub mod releases;
@@ -53,7 +55,9 @@ pub fn router(deployment: DeploymentImpl) -> IntoMakeService<Router> {
         .merge(search::router(&deployment))
         .merge(preview::api_router())
         .merge(procedure_runs::router())
+        .merge(procedures::router())
         .merge(projects::router())
+        .merge(lead_agent::router())
         .merge(releases::router())
         .merge(sessions::router(&deployment))
         .merge(terminal::router())

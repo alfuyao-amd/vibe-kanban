@@ -46,6 +46,15 @@ export type ProcedureParamSummary = { name: string, type: string, required: bool
 
 export type StartProcedureRequest = { procedure_name: string, params: Record<string, unknown>, workspace_id: string | null, };
 
+export type PlanRequest = { goal: string, workspace_id: string, };
+
+export type PickedPlan = { procedure_name: string, params: Record<string, unknown>, 
+/**
+ * The raw assistant message; useful for surfacing reasoning to the user
+ * when the JSON the planner returned is missing fields.
+ */
+raw_assistant_message: string | null, };
+
 export type DraftFollowUpData = { message: string, executor_config: ExecutorConfig, };
 
 export type DraftWorkspaceData = { message: string, repos: Array<DraftWorkspaceRepo>, executor_config: ExecutorConfig | null, linked_issue: DraftWorkspaceLinkedIssue | null, attachments: Array<DraftWorkspaceAttachment>, };

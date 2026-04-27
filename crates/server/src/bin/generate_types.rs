@@ -30,6 +30,8 @@ fn generate_types_content() -> String {
         server::routes::procedure_runs::ProcedureSummary::decl(),
         server::routes::procedure_runs::ProcedureParamSummary::decl(),
         server::routes::procedure_runs::StartProcedureRequest::decl(),
+        server::routes::lead_agent::PlanRequest::decl(),
+        server::lead_agent::PickedPlan::decl(),
         db::models::scratch::DraftFollowUpData::decl(),
         db::models::scratch::DraftWorkspaceData::decl(),
         db::models::scratch::DraftWorkspaceAttachment::decl(),

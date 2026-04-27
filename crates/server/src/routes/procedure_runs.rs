@@ -17,7 +17,7 @@ use ts_rs::TS;
 use utils::response::ApiResponse;
 use uuid::Uuid;
 
-use crate::{DeploymentImpl, error::ApiError, procedure_runtime};
+use crate::{DeploymentImpl, error::ApiError, procedure_catalog, procedure_runtime};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ProcedureSummary {
@@ -83,14 +83,13 @@ pub async fn start_procedure_run(
     Path(project_id): Path<Uuid>,
     Json(req): Json<StartProcedureRequest>,
 ) -> Result<ResponseJson<ApiResponse<ProcedureRun>>, ApiError> {
-    let procedures = orchestration::builtin_procedures()
-        .map_err(|e| ApiError::BadRequest(format!("failed to load procedures: {e}")))?;
-    let procedure = procedures
-        .into_iter()
-        .find(|p| p.name == req.procedure_name)
-        .ok_or_else(|| {
-            ApiError::BadRequest(format!("unknown procedure `{}`", req.procedure_name))
-        })?;
+    let procedure =
+        procedure_catalog::find_in_project(&deployment.db().pool, project_id, &req.procedure_name)
+            .await
+            .map_err(|e| ApiError::BadRequest(format!("failed to load procedures: {e}")))?
+            .ok_or_else(|| {
+                ApiError::BadRequest(format!("unknown procedure `{}`", req.procedure_name))
+            })?;
 
     let params =
         enrich_params_with_workspace(req.params.clone(), &deployment, req.workspace_id).await;

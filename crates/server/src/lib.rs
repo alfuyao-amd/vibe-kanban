@@ -1,5 +1,7 @@
 pub mod error;
+pub mod lead_agent;
 pub mod middleware;
+pub mod procedure_catalog;
 pub mod procedure_runtime;
 pub mod relay_pairing;
 pub mod routes;

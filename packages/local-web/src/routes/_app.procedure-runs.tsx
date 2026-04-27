@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createFileRoute,
   Link,
@@ -7,11 +7,13 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import {
+  leadAgentApi,
   proceduresApi,
   projectsApi,
   workspacesApi,
 } from '@/shared/lib/api';
 import type {
+  PickedPlan,
   ProcedureRun,
   ProcedureSummary,
   Project,
@@ -48,23 +50,29 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
+  const [projectId, setProjectId] = useState<string>(defaultProjectId ?? '');
+  const [procedureName, setProcedureName] = useState<string>('');
+  const [workspaceId, setWorkspaceId] = useState<string>('');
+  const [paramValues, setParamValues] = useState<Record<string, string>>({});
+  const [goal, setGoal] = useState<string>('');
+  const [planNote, setPlanNote] = useState<string | null>(null);
+
   const projectsQuery = useQuery<Project[]>({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list(),
   });
   const proceduresQuery = useQuery<ProcedureSummary[]>({
-    queryKey: ['procedures'],
-    queryFn: () => proceduresApi.listDefinitions(),
+    queryKey: ['procedures', projectId || 'global'],
+    queryFn: () =>
+      projectId
+        ? proceduresApi.listForProject(projectId)
+        : proceduresApi.listDefinitions(),
+    enabled: true,
   });
   const workspacesQuery = useQuery<Workspace[]>({
     queryKey: ['workspaces-all'],
     queryFn: () => workspacesApi.getAllWorkspaces(),
   });
-
-  const [projectId, setProjectId] = useState<string>(defaultProjectId ?? '');
-  const [procedureName, setProcedureName] = useState<string>('');
-  const [workspaceId, setWorkspaceId] = useState<string>('');
-  const [paramValues, setParamValues] = useState<Record<string, string>>({});
 
   // Auto-select sensible defaults once data loads.
   useEffect(() => {
@@ -77,16 +85,56 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
       setProcedureName(proceduresQuery.data[0].name);
     }
   }, [procedureName, proceduresQuery.data]);
+  useEffect(() => {
+    if (!workspaceId && workspacesQuery.data && workspacesQuery.data.length > 0) {
+      setWorkspaceId(workspacesQuery.data[0].id);
+    }
+  }, [workspaceId, workspacesQuery.data]);
 
   const procedure = useMemo(
     () => proceduresQuery.data?.find((p) => p.name === procedureName),
     [proceduresQuery.data, procedureName]
   );
 
-  // Reset param values when procedure changes.
+  // Reset param values when the user manually picks a different procedure;
+  // skipped when the planner sets both at once via applyPickedPlan.
+  const skipNextResetRef = useRef(false);
   useEffect(() => {
+    if (skipNextResetRef.current) {
+      skipNextResetRef.current = false;
+      return;
+    }
     setParamValues({});
   }, [procedureName]);
+
+  const applyPickedPlan = (plan: PickedPlan) => {
+    skipNextResetRef.current = true;
+    setProcedureName(plan.procedure_name);
+    const next: Record<string, string> = {};
+    if (plan.params && typeof plan.params === 'object') {
+      for (const [k, v] of Object.entries(plan.params as Record<string, unknown>)) {
+        if (v == null) continue;
+        next[k] = typeof v === 'string' ? v : JSON.stringify(v);
+      }
+    }
+    setParamValues(next);
+  };
+
+  const planMutation = useMutation({
+    mutationFn: async () => {
+      if (!goal.trim()) throw new Error('goal is required');
+      if (!projectId) throw new Error('project is required for planning');
+      if (!workspaceId) throw new Error('workspace is required for planning');
+      return leadAgentApi.plan(projectId, {
+        goal: goal.trim(),
+        workspace_id: workspaceId,
+      });
+    },
+    onSuccess: (plan) => {
+      applyPickedPlan(plan);
+      setPlanNote(`Picked ${plan.procedure_name}. Review params, then Start run.`);
+    },
+  });
 
   const startMutation = useMutation({
     mutationFn: async () => {
@@ -126,6 +174,54 @@ function StartProcedureForm({ defaultProjectId }: { defaultProjectId?: string })
   return (
     <div className="rounded border p-4">
       <h2 className="text-sm font-medium mb-3">Start a procedure run</h2>
+
+      <div className="rounded border border-dashed p-3 mb-4">
+        <label className="flex flex-col gap-1 text-xs">
+          <span className="text-low">
+            Plan from a goal{' '}
+            <span className="text-low">(asks Claude to pick a procedure + params; needs a workspace)</span>
+          </span>
+          <textarea
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="e.g. add a wave(name) function with a test"
+            rows={2}
+            className="rounded border bg-transparent px-2 py-1.5 text-sm"
+          />
+        </label>
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={() => planMutation.mutate()}
+            disabled={!goal.trim() || !workspaceId || planMutation.isPending}
+            title={
+              !goal.trim()
+                ? 'Enter a goal'
+                : !workspaceId
+                  ? 'Pick a workspace below'
+                  : ''
+            }
+            className="rounded border border-blue-600 text-blue-600 hover:bg-blue-600/10 disabled:opacity-50 text-sm px-3 py-1.5"
+          >
+            {planMutation.isPending ? 'Planning…' : 'Plan'}
+          </button>
+          {!planNote && !planMutation.error && (!goal.trim() || !workspaceId) && (
+            <span className="text-xs text-low">
+              {!goal.trim()
+                ? 'Enter a goal'
+                : 'Pick a workspace below first'}
+            </span>
+          )}
+          {planNote && !planMutation.error && (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400">{planNote}</span>
+          )}
+          {planMutation.error && (
+            <span className="text-xs text-rose-500">
+              {(planMutation.error as Error).message}
+            </span>
+          )}
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
         <label className="flex flex-col gap-1 text-xs">
           <span className="text-low">Project</span>
