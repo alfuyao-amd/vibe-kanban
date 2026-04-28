@@ -207,7 +207,13 @@ export function SharedAppLayout() {
   }, [navigate]);
 
   const handleProcedureRunsClick = useCallback(() => {
-    const search = activeProjectId ? { projectId: activeProjectId } : {};
+    // Prefer the project the URL is currently inside; otherwise fall back
+    // to the last-selected one so the procedure-runs page lands in the same
+    // project the user just authored procedures in (instead of `projects[0]`).
+    const fallbackProjectId =
+      useUiPreferencesStore.getState().selectedProjectId ?? null;
+    const targetProjectId = activeProjectId ?? fallbackProjectId;
+    const search = targetProjectId ? { projectId: targetProjectId } : {};
     void navigate({ to: '/procedure-runs', search });
   }, [navigate, activeProjectId]);
 

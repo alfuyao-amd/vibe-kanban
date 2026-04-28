@@ -268,7 +268,11 @@ pub async fn bootstrap_prompt(pool: &SqlitePool, project_id: Uuid) -> Result<Str
          `get_procedure_state`, `cancel_procedure`, `delete_procedure`, \
          `approve_procedure_run`, `reject_procedure_run`. They are exposed by \
          the `vibe_kanban_project` MCP server already attached to this \
-         session, so prefer them over shell commands or REST calls.\n\n",
+         session, so prefer them over shell commands or REST calls.\n\n\
+         When you call `start_procedure`, you can omit `workspace_id` — the \
+         server defaults it to this lead-agent session's workspace. Pass an \
+         explicit `workspace_id` only when the user wants the run executed in \
+         a different workspace than the one you're chatting in.\n\n",
     );
 
     s.push_str("--- Procedure YAML schema ---\n");

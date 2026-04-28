@@ -9,6 +9,18 @@ use uuid::Uuid;
 use super::{McpMode, McpServer};
 use crate::task_server::tools::ToolError;
 
+/// Subset of `LeadAgentSession` we read to default `start_procedure`'s
+/// workspace. Only `workspace_id` is needed, but matching the field shape
+/// lets us decode the live REST response without a dedicated route.
+#[derive(Debug, Deserialize)]
+struct LeadAgentSessionView {
+    #[allow(dead_code)]
+    project_id: Uuid,
+    #[allow(dead_code)]
+    session_id: Uuid,
+    workspace_id: Uuid,
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct WireProcedureSummary {
     pub name: String,
@@ -105,7 +117,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Start a new procedure run for the current project. Returns the created procedure_run row."
+        description = "Start a new procedure run for the current project. If `workspace_id` is omitted, the project's lead-agent workspace is used (so most callers can leave it blank). Returns the created procedure_run row."
     )]
     async fn start_procedure(
         &self,
@@ -118,6 +130,27 @@ impl McpServer {
         let project_id = match self.resolve_procedure_project_id() {
             Ok(id) => id,
             Err(err) => return Ok(Self::tool_error(err)),
+        };
+
+        // Every procedure ultimately needs a workspace_id (VkApiBackend's
+        // create_session and the {{workspace.*}} template fields both
+        // require it). Default to the lead-agent's bound workspace so the
+        // model doesn't have to remember plumbing.
+        let workspace_id = match workspace_id {
+            Some(id) => Some(id),
+            None => match self.lookup_lead_agent_workspace(project_id).await {
+                Ok(Some(id)) => Some(id),
+                Ok(None) => {
+                    return Ok(Self::tool_error(ToolError::new(
+                        "start_procedure: no workspace_id provided and this project has no lead-agent session bound to a workspace",
+                        Some(
+                            "Either pass an explicit workspace_id, or start a lead agent for \
+                             this project first via POST /api/projects/{id}/lead-agent.",
+                        ),
+                    )));
+                }
+                Err(err) => return Ok(Self::tool_error(err)),
+            },
         };
 
         let payload = StartProcedurePayload {
@@ -249,5 +282,19 @@ impl McpServer {
             McpMode::ProjectOrchestrator { project_id } => Ok(*project_id),
             _ => self.resolve_project_id(None),
         }
+    }
+
+    /// Look up the workspace_id bound to the project's lead-agent session, if
+    /// one is registered. Returns `Ok(None)` when the endpoint exists but the
+    /// project has no lead agent yet (the route returns `null` data in that
+    /// case). Used by `start_procedure` to default the workspace when the
+    /// caller didn't supply one.
+    async fn lookup_lead_agent_workspace(
+        &self,
+        project_id: Uuid,
+    ) -> Result<Option<Uuid>, ToolError> {
+        let url = self.url(&format!("/api/projects/{project_id}/lead-agent"));
+        let session: Option<LeadAgentSessionView> = self.send_json(self.client.get(&url)).await?;
+        Ok(session.map(|s| s.workspace_id))
     }
 }

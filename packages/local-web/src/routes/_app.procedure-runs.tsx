@@ -327,18 +327,19 @@ function StartProcedureForm({
         </div>
       )}
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-2">
         <button
           onClick={() => startMutation.mutate()}
           disabled={!projectId || !procedure || startMutation.isPending}
-          className="rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-4 py-1.5"
+          className="self-start rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-4 py-1.5"
         >
           {startMutation.isPending ? 'Starting…' : 'Start run'}
         </button>
         {startMutation.error && (
-          <span className="text-xs text-rose-500">
+          <div className="rounded border border-rose-400 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 text-xs p-2 whitespace-pre-wrap">
+            <strong>Could not start run:</strong>{' '}
             {(startMutation.error as Error).message}
-          </span>
+          </div>
         )}
       </div>
     </div>
