@@ -75,6 +75,135 @@ pub struct ProcedureSourceView {
     pub read_only: bool,
 }
 
+/// What the procedure-graph view needs to render a state machine: each state
+/// reduced to a node with a stable id + display kind, plus the directed edges
+/// derived from `on_success` / `on_failure`. Layout is the client's job
+/// (dagre); this just stays close to the YAML's logical shape.
+#[derive(Debug, Serialize, Deserialize, TS)]
+pub struct ProcedureGraphView {
+    pub name: String,
+    pub initial_state: String,
+    pub nodes: Vec<ProcedureGraphNode>,
+    pub edges: Vec<ProcedureGraphEdge>,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+pub struct ProcedureGraphNode {
+    pub id: String,
+    pub kind: ProcedureNodeKind,
+    /// Action kind (`create_session`, `follow_up`, `start_review`, `merge`)
+    /// when the state has an action; absent for pure-gate or terminal states.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action_kind: Option<String>,
+    /// Gate kind (`deterministic`, `llm_judge`, `human`) when the state has a
+    /// gate. UI surfaces this as a small badge alongside the action kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gate_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum ProcedureNodeKind {
+    /// A working state with at least one of an action or a gate.
+    Step,
+    /// `terminal: success` — drawn in green by the UI.
+    TerminalSuccess,
+    /// `terminal: failure` — drawn in red.
+    TerminalFailure,
+}
+
+#[derive(Debug, Serialize, Deserialize, TS)]
+pub struct ProcedureGraphEdge {
+    pub from: String,
+    pub to: String,
+    pub kind: ProcedureEdgeKind,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[ts(rename_all = "snake_case")]
+pub enum ProcedureEdgeKind {
+    /// `on_success` transition.
+    Success,
+    /// `on_failure` transition.
+    Failure,
+}
+
+/// Build a graph view of a procedure (parsed states + transitions) for the
+/// React-Flow renderer. Pulls YAML from the same source as
+/// [`get_procedure_source`] so built-ins and project-local both work.
+pub async fn get_procedure_graph(
+    State(deployment): State<DeploymentImpl>,
+    Path((project_id, name)): Path<(Uuid, String)>,
+) -> Result<ResponseJson<ApiResponse<ProcedureGraphView>>, ApiError> {
+    let yaml = if let Some(yaml) = orchestration::builtin_procedure_yaml(&name) {
+        yaml.to_string()
+    } else {
+        ProcedureRecord::find_by_name(&deployment.db().pool, project_id, &name)
+            .await?
+            .ok_or_else(|| ApiError::BadRequest(format!("procedure `{name}` not found")))?
+            .yaml
+    };
+    let procedure = orchestration::load_from_yaml(&yaml)
+        .map_err(|e| ApiError::BadRequest(format!("invalid procedure yaml: {e}")))?;
+    Ok(ResponseJson(ApiResponse::success(graph_from_procedure(
+        &procedure,
+    ))))
+}
+
+fn graph_from_procedure(p: &orchestration::Procedure) -> ProcedureGraphView {
+    let mut nodes = Vec::with_capacity(p.states.len());
+    let mut edges = Vec::new();
+
+    for (state_name, state) in &p.states {
+        let kind = match state.terminal {
+            Some(orchestration::Terminal::Success) => ProcedureNodeKind::TerminalSuccess,
+            Some(orchestration::Terminal::Failure) => ProcedureNodeKind::TerminalFailure,
+            None => ProcedureNodeKind::Step,
+        };
+        let action_kind = state.action.as_ref().map(|a| match a {
+            orchestration::Action::CreateSession { .. } => "create_session".to_string(),
+            orchestration::Action::FollowUp { .. } => "follow_up".to_string(),
+            orchestration::Action::StartReview { .. } => "start_review".to_string(),
+            orchestration::Action::Merge { .. } => "merge".to_string(),
+        });
+        let gate_kind = state.gate.as_ref().map(|g| match g {
+            orchestration::Gate::Deterministic { .. } => "deterministic".to_string(),
+            orchestration::Gate::LlmJudge { .. } => "llm_judge".to_string(),
+            orchestration::Gate::Human { .. } => "human".to_string(),
+        });
+        nodes.push(ProcedureGraphNode {
+            id: state_name.clone(),
+            kind,
+            action_kind,
+            gate_kind,
+        });
+
+        if let Some(target) = &state.on_success {
+            edges.push(ProcedureGraphEdge {
+                from: state_name.clone(),
+                to: target.clone(),
+                kind: ProcedureEdgeKind::Success,
+            });
+        }
+        if let Some(target) = &state.on_failure {
+            edges.push(ProcedureGraphEdge {
+                from: state_name.clone(),
+                to: target.clone(),
+                kind: ProcedureEdgeKind::Failure,
+            });
+        }
+    }
+
+    ProcedureGraphView {
+        name: p.name.clone(),
+        initial_state: p.initial_state.clone(),
+        nodes,
+        edges,
+    }
+}
+
 /// Fetch the raw YAML body and source label for a single procedure (built-in
 /// or project-local). Used by the procedure editor to populate the textarea
 /// when editing or "forking" a built-in.
@@ -164,6 +293,10 @@ pub fn router() -> Router<DeploymentImpl> {
             "/projects/{project_id}/procedures/{name}",
             get(get_procedure_source).delete(delete_procedure),
         )
+        .route(
+            "/projects/{project_id}/procedures/{name}/graph",
+            get(get_procedure_graph),
+        )
 }
 
 #[cfg(test)]
@@ -201,6 +334,40 @@ mod tests {
         assert_eq!(
             label_for("auto_yolo", &stored),
             ProcedureSourceLabel::LeadAgent
+        );
+    }
+
+    #[test]
+    fn graph_from_builtin_smoke_success_has_terminal_and_step_nodes() {
+        let yaml = orchestration::builtin_procedure_yaml("smoke_success").unwrap();
+        let proc = orchestration::load_from_yaml(yaml).unwrap();
+        let graph = graph_from_procedure(&proc);
+        assert_eq!(graph.name, "smoke_success");
+        assert_eq!(graph.initial_state, "plan");
+
+        let plan = graph.nodes.iter().find(|n| n.id == "plan").unwrap();
+        assert_eq!(plan.kind, ProcedureNodeKind::Step);
+        assert_eq!(plan.action_kind.as_deref(), Some("create_session"));
+        assert_eq!(plan.gate_kind.as_deref(), Some("deterministic"));
+
+        let merge = graph.nodes.iter().find(|n| n.id == "merge").unwrap();
+        // merge in smoke_success is a terminal-success state with a no-op
+        // action that the runtime short-circuits over.
+        assert_eq!(merge.kind, ProcedureNodeKind::TerminalSuccess);
+
+        let failed = graph.nodes.iter().find(|n| n.id == "failed").unwrap();
+        assert_eq!(failed.kind, ProcedureNodeKind::TerminalFailure);
+
+        // plan -> review on success; plan -> failed on failure.
+        assert!(
+            graph.edges.iter().any(|e| e.from == "plan"
+                && e.to == "review"
+                && e.kind == ProcedureEdgeKind::Success)
+        );
+        assert!(
+            graph.edges.iter().any(|e| e.from == "plan"
+                && e.to == "failed"
+                && e.kind == ProcedureEdgeKind::Failure)
         );
     }
 

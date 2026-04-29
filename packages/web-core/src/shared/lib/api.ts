@@ -100,6 +100,7 @@ import {
   OpenRemoteWorkspaceInEditorRequest,
   OpenRemoteEditorResponse,
   ProfileResponse,
+  ProcedureGraphView,
   ProcedureRun,
   ProcedureSourceView,
   ProcedureSummary,
@@ -1138,6 +1139,16 @@ export const proceduresApi = {
       `/api/projects/${projectId}/procedures/${encodeURIComponent(name)}`
     );
     return handleApiResponse<ProcedureSourceView>(response);
+  },
+
+  getProcedureGraph: async (
+    projectId: string,
+    name: string
+  ): Promise<ProcedureGraphView> => {
+    const response = await makeRequest(
+      `/api/projects/${projectId}/procedures/${encodeURIComponent(name)}/graph`
+    );
+    return handleApiResponse<ProcedureGraphView>(response);
   },
 
   deleteProcedure: async (projectId: string, name: string): Promise<void> => {

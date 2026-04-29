@@ -9,7 +9,12 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { proceduresApi } from '@/shared/lib/api';
-import type { ProcedureSourceView, ProcedureSummary } from 'shared/types';
+import { ProcedureGraph } from '@web/shared/ProcedureGraph';
+import type {
+  ProcedureGraphView,
+  ProcedureSourceView,
+  ProcedureSummary,
+} from 'shared/types';
 
 const NEW_PROCEDURE_TEMPLATE = `name: my_procedure
 version: 1
@@ -85,6 +90,21 @@ function ProcedureEditorPage() {
 
   const [yamlDraft, setYamlDraft] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Default to graph view because the user's complaint was specifically that
+  // raw YAML was a poor primary presentation. YAML stays one click away.
+  const [view, setView] = useState<'graph' | 'yaml'>('graph');
+
+  const graphQuery = useQuery<ProcedureGraphView | null>({
+    queryKey: ['procedure-graph', projectId, selectedName],
+    queryFn: async () =>
+      selectedName
+        ? proceduresApi.getProcedureGraph(projectId, selectedName)
+        : null,
+    // The graph endpoint re-parses YAML server-side, so it only makes sense
+    // for already-saved procedures. New (unsaved) drafts show the YAML view
+    // until they're saved.
+    enabled: !!selectedName && !isNew,
+  });
 
   // Reset draft when the selection changes.
   useEffect(() => {
@@ -107,6 +127,9 @@ function ProcedureEditorPage() {
       queryClient.invalidateQueries({ queryKey: ['procedures', projectId] });
       queryClient.invalidateQueries({
         queryKey: ['procedure-source', projectId],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ['procedure-graph', projectId],
       });
     },
     onError: (err: unknown) => {
@@ -238,14 +261,48 @@ function ProcedureEditorPage() {
                 <div className="text-xs text-low">Loading source…</div>
               )}
 
-              <textarea
-                value={yamlDraft}
-                onChange={(e) => setYamlDraft(e.target.value)}
-                spellCheck={false}
-                readOnly={isReadOnly}
-                rows={28}
-                className="font-mono text-xs rounded border p-3 bg-zinc-50 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
+              {!isNew && (
+                <div className="inline-flex rounded border text-xs overflow-hidden self-start">
+                  {(['graph', 'yaml'] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      onClick={() => setView(opt)}
+                      className={`px-3 py-1 ${
+                        view === opt
+                          ? 'bg-zinc-200 dark:bg-zinc-800 font-medium'
+                          : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'
+                      }`}
+                    >
+                      {opt === 'graph' ? 'Graph' : 'YAML'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* New (unsaved) procedures don't have a server-rendered graph
+                  yet, so always show YAML. Saved procedures default to graph
+                  unless the user toggled. */}
+              {!isNew && view === 'graph' ? (
+                graphQuery.isLoading ? (
+                  <div className="text-xs text-low">Loading graph…</div>
+                ) : graphQuery.error ? (
+                  <div className="rounded border border-rose-400 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 text-xs p-2">
+                    Graph unavailable: {(graphQuery.error as Error).message}.
+                    Switch to YAML to view the source.
+                  </div>
+                ) : graphQuery.data ? (
+                  <ProcedureGraph graph={graphQuery.data} />
+                ) : null
+              ) : (
+                <textarea
+                  value={yamlDraft}
+                  onChange={(e) => setYamlDraft(e.target.value)}
+                  spellCheck={false}
+                  readOnly={isReadOnly}
+                  rows={28}
+                  className="font-mono text-xs rounded border p-3 bg-zinc-50 dark:bg-zinc-950 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              )}
 
               {errorMsg && (
                 <div className="rounded border border-rose-400 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 text-xs p-2 whitespace-pre-wrap">

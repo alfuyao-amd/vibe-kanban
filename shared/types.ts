@@ -61,6 +61,26 @@ export type ProcedureSourceView = { name: string, yaml: string, source: Procedur
  */
 read_only: boolean, };
 
+export type ProcedureGraphView = { name: string, initial_state: string, nodes: Array<ProcedureGraphNode>, edges: Array<ProcedureGraphEdge>, };
+
+export type ProcedureGraphNode = { id: string, kind: ProcedureNodeKind, 
+/**
+ * Action kind (`create_session`, `follow_up`, `start_review`, `merge`)
+ * when the state has an action; absent for pure-gate or terminal states.
+ */
+action_kind: string | null, 
+/**
+ * Gate kind (`deterministic`, `llm_judge`, `human`) when the state has a
+ * gate. UI surfaces this as a small badge alongside the action kind.
+ */
+gate_kind: string | null, };
+
+export type ProcedureGraphEdge = { from: string, to: string, kind: ProcedureEdgeKind, };
+
+export type ProcedureNodeKind = "step" | "terminal_success" | "terminal_failure";
+
+export type ProcedureEdgeKind = "success" | "failure";
+
 export type PlanRequest = { goal: string, workspace_id: string, };
 
 export type StartLeadAgentRequest = { workspace_id: string, };
