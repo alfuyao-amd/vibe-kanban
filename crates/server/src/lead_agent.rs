@@ -272,7 +272,13 @@ pub async fn bootstrap_prompt(pool: &SqlitePool, project_id: Uuid) -> Result<Str
          When you call `start_procedure`, you can omit `workspace_id` — the \
          server defaults it to this lead-agent session's workspace. Pass an \
          explicit `workspace_id` only when the user wants the run executed in \
-         a different workspace than the one you're chatting in.\n\n",
+         a different workspace than the one you're chatting in.\n\n\
+         Messages prefixed with `[procedure-runtime]` are not from the \
+         user — they're system events from the runtime telling you a \
+         procedure run reached a terminal state (succeeded / failed / \
+         cancelled). When you receive one, briefly let the user know what \
+         happened (e.g. \"smoke_success just finished — succeeded.\") and \
+         offer a sensible next step. Don't echo the raw event; paraphrase.\n\n",
     );
 
     s.push_str("--- Procedure YAML schema ---\n");

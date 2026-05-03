@@ -803,6 +803,12 @@ pub fn spawn_procedure_run(
                 }
             }
         };
+        let terminal_label = match &outcome {
+            Ok(RunOutcome::Success) => Some("succeeded"),
+            Ok(RunOutcome::Failure) => Some("failed"),
+            Ok(RunOutcome::Cancelled) => Some("cancelled"),
+            Err(_) => Some("failed"),
+        };
         match outcome {
             Ok(outcome) => tracing::info!(?run_id, ?outcome, "procedure run completed"),
             Err(err) => {
@@ -813,7 +819,68 @@ pub fn spawn_procedure_run(
         }
         approvals().deregister(run_id).await;
         cancellations().deregister(run_id).await;
+
+        // Fire-and-forget notification to the project's lead-agent session.
+        // Detached so cleanup of the run state doesn't block on Claude's
+        // follow-up roundtrip. Errors only log — a failed notification
+        // should never affect the run's terminal status.
+        if let Some(label) = terminal_label {
+            let pool_for_notify = pool.clone();
+            let procedure_name = procedure.name.clone();
+            tokio::spawn(async move {
+                if let Err(err) =
+                    notify_lead_agent_terminal(&pool_for_notify, run_id, &procedure_name, label)
+                        .await
+                {
+                    tracing::warn!(
+                        ?run_id,
+                        %err,
+                        "lead-agent notification on terminal failed"
+                    );
+                }
+            });
+        }
     })
+}
+
+/// Best-effort post-completion ping into the project's lead-agent chat
+/// session. Looks up the run's project, finds that project's lead agent
+/// (if any), and POSTs a follow-up to the session so the agent sees the
+/// terminal event in its own conversation history. The agent is then free
+/// to surface it to the user (e.g. "Run X just finished — want to start
+/// another?"). No-ops silently when the project has no lead agent or the
+/// backend URL isn't resolvable.
+async fn notify_lead_agent_terminal(
+    pool: &SqlitePool,
+    run_id: Uuid,
+    procedure_name: &str,
+    label: &str,
+) -> Result<(), String> {
+    use db::models::project_lead_agent::ProjectLeadAgent;
+    let run = ProcedureRun::find_by_id(pool, run_id)
+        .await
+        .map_err(|e| format!("load run: {e}"))?
+        .ok_or_else(|| "run row vanished after terminal".to_string())?;
+    let lead = match ProjectLeadAgent::find_for_project(pool, run.project_id)
+        .await
+        .map_err(|e| format!("load lead agent: {e}"))?
+    {
+        Some(l) => l,
+        None => return Ok(()), // Project has no lead agent; nothing to notify.
+    };
+    let backend = VkApiBackend::from_env().map_err(|e| format!("backend url: {e}"))?;
+    let prompt = format!(
+        "[procedure-runtime] Run {} ({procedure_name}) finished: {label}. \
+         final_state={}. (System event from the runtime — surface to the \
+         user as a brief notification.)",
+        &run_id.to_string()[..8],
+        run.current_state,
+    );
+    backend
+        .follow_up(SessionId(lead.session_id.to_string()), None, &prompt)
+        .await
+        .map_err(|e| format!("follow-up: {e}"))?;
+    Ok(())
 }
 
 #[cfg(test)]

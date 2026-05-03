@@ -19,6 +19,12 @@ import type {
 } from 'shared/types';
 
 const ACTIVE_RUN_STATUSES = new Set(['running', 'awaiting_approval']);
+const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
+/** Keep showing a run in the active panel for this many ms after it
+ *  reaches a terminal state, so the user sees "succeeded / failed /
+ *  cancelled" instead of the panel snapping back to "No active procedure"
+ *  the instant the state machine finishes. */
+const TERMINAL_LINGER_MS = 10_000;
 
 function statusBadgeClass(status: string): string {
   switch (status) {
@@ -139,14 +145,21 @@ function LeadAgentPage() {
     [runsQuery.data]
   );
 
-  // The most recent run that's still running or parked at a human gate.
-  // The side panel renders this run's procedure graph with `current_state`
-  // highlighted so the user watches the state machine advance live next to
-  // the chat. `null` when nothing is active.
+  // The run shown in the side panel. Picks an actively-running run when
+  // there is one; otherwise lingers on a recently-terminal run for a few
+  // seconds so the user catches the success / failure rather than seeing
+  // the panel snap back to empty the moment the state machine ends.
   const activeRun = useMemo(() => {
+    const runs = runsQuery.data ?? [];
+    const active = runs.find((r) => ACTIVE_RUN_STATUSES.has(r.status));
+    if (active) return active;
+    const now = Date.now();
     return (
-      (runsQuery.data ?? []).find((r) => ACTIVE_RUN_STATUSES.has(r.status)) ??
-      null
+      runs.find((r) => {
+        if (!TERMINAL_RUN_STATUSES.has(r.status)) return false;
+        const finishedAt = new Date(r.updated_at).getTime();
+        return now - finishedAt < TERMINAL_LINGER_MS;
+      }) ?? null
     );
   }, [runsQuery.data]);
 
