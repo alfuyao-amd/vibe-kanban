@@ -165,7 +165,9 @@ interface ProcedureGraphProps {
   /// run-detail page). Passed from outside so this component stays unaware
   /// of run state.
   currentState?: string | null;
-  height?: number;
+  /// Pixel height (number) or any CSS height value (string, e.g. '100%').
+  /// Embedded contexts pass '100%' so the graph fills its parent panel.
+  height?: number | string;
 }
 
 export function ProcedureGraph({

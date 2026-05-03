@@ -15,6 +15,13 @@ interface UseWorkspaceSessionsOptions {
    * fetched sessions list, falls back to first-session selection.
    */
   initialSessionId?: string | null;
+  /**
+   * When set to a non-empty array, the returned `sessions` array is filtered
+   * down to just these ids. Used by the embedded lead-agent chat to hide
+   * worker / unrelated sessions from the conversation list. `null` /
+   * `undefined` / empty array all mean "no filter — show every session".
+   */
+  sessionIdsAllow?: string[] | null;
 }
 
 /** Discriminated union for session selection state */
@@ -45,7 +52,11 @@ export function useWorkspaceSessions(
   options: UseWorkspaceSessionsOptions = {}
 ): UseWorkspaceSessionsResult {
   const hostId = useHostId();
-  const { enabled = true, initialSessionId = null } = options;
+  const {
+    enabled = true,
+    initialSessionId = null,
+    sessionIdsAllow = null,
+  } = options;
   const [selection, setSelection] = useState<SessionSelection | undefined>(
     undefined
   );
@@ -55,11 +66,21 @@ export function useWorkspaceSessions(
   // different session in the list) so we don't keep snapping back.
   const consumedInitialRef = useRef(false);
 
-  const { data: sessions = [], isLoading } = useQuery<Session[]>({
+  const { data: rawSessions = [], isLoading } = useQuery<Session[]>({
     queryKey: workspaceSessionKeys.byWorkspace(workspaceId, hostId),
     queryFn: () => sessionsApi.getByWorkspace(workspaceId!),
     enabled: enabled && !!workspaceId,
   });
+
+  // Optional allow-list filter. The lead-agent embedded chat passes just the
+  // lead session's id so the conversation list doesn't surface workers or
+  // unrelated user sessions. Memoised so referential identity stays stable
+  // across renders when the filter doesn't change.
+  const sessions = useMemo(() => {
+    if (!sessionIdsAllow || sessionIdsAllow.length === 0) return rawSessions;
+    const allow = new Set(sessionIdsAllow);
+    return rawSessions.filter((s) => allow.has(s.id));
+  }, [rawSessions, sessionIdsAllow]);
 
   // Combined effect: handle workspace changes and auto-select sessions
   // This replaces two separate effects that had a race condition where the reset

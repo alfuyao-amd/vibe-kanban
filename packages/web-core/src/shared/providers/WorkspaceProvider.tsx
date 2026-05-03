@@ -34,12 +34,20 @@ interface WorkspaceProviderProps {
    * regular workspace routes leave it undefined and fall back to URL.
    */
   initialSessionIdOverride?: string | null;
+  /**
+   * Restrict the workspace's visible sessions to this allow-list. Used by
+   * the embedded lead-agent chat to hide procedure-worker sessions and any
+   * unrelated user sessions from the conversation-list UI. Empty / null /
+   * undefined means "no filter — show every session" (the default).
+   */
+  sessionIdsAllow?: string[] | null;
 }
 
 export function WorkspaceProvider({
   children,
   workspaceIdOverride,
   initialSessionIdOverride,
+  sessionIdsAllow,
 }: WorkspaceProviderProps) {
   const { workspaceId: routeWorkspaceId } = useParams({ strict: false });
   const workspaceId = workspaceIdOverride ?? routeWorkspaceId;
@@ -82,6 +90,7 @@ export function WorkspaceProvider({
   } = useWorkspaceSessions(workspaceId, {
     enabled: !isCreateMode,
     initialSessionId,
+    sessionIdsAllow,
   });
 
   const { repos, isLoading: isReposLoading } = useWorkspaceRepo(workspaceId, {

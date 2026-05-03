@@ -9,12 +9,105 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { leadAgentApi, proceduresApi, workspacesApi } from '@/shared/lib/api';
 import { WorkspaceProvider } from '@/shared/providers/WorkspaceProvider';
 import { Workspaces as WorkspacesUi } from '@/pages/workspaces/Workspaces';
+import { ProcedureGraph } from '@web/shared/ProcedureGraph';
 import type {
   LeadAgentSession,
+  ProcedureGraphView,
   ProcedureRun,
   ProcedureSummary,
   Workspace,
 } from 'shared/types';
+
+const ACTIVE_RUN_STATUSES = new Set(['running', 'awaiting_approval']);
+
+function statusBadgeClass(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'bg-blue-500/15 text-blue-600 dark:text-blue-400';
+    case 'awaiting_approval':
+      return 'bg-amber-500/15 text-amber-600 dark:text-amber-400';
+    case 'succeeded':
+      return 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400';
+    case 'failed':
+      return 'bg-rose-500/15 text-rose-600 dark:text-rose-400';
+    case 'cancelled':
+      return 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400';
+    default:
+      return 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400';
+  }
+}
+
+/** Side panel: live state-machine view of whatever procedure is active for
+ *  this project. Pulls the active run + its graph and re-renders as the run
+ *  advances. Designed to live alongside the embedded chat so the user can
+ *  watch the agent talk AND watch the procedure transition simultaneously.
+ */
+function ActiveProcedurePanel({
+  projectId,
+  activeRun,
+}: {
+  projectId: string;
+  activeRun: ProcedureRun | null;
+}) {
+  const graphQuery = useQuery<ProcedureGraphView | null>({
+    queryKey: ['procedure-graph', projectId, activeRun?.procedure_name ?? null],
+    queryFn: async () =>
+      activeRun
+        ? proceduresApi.getProcedureGraph(projectId, activeRun.procedure_name)
+        : null,
+    enabled: !!activeRun,
+  });
+
+  if (!activeRun) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-center text-xs text-low p-6">
+        <div className="font-medium mb-1">No active procedure</div>
+        <p className="max-w-[24ch]">
+          Ask the lead agent to start one. The state machine will appear here as
+          it runs.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="px-3 py-2 border-b text-xs flex items-center gap-2">
+        <Link
+          to="/procedure-runs/$runId"
+          params={{ runId: activeRun.id }}
+          className="font-medium hover:underline"
+        >
+          {activeRun.procedure_name}
+        </Link>
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] ${statusBadgeClass(activeRun.status)}`}
+        >
+          {activeRun.status}
+        </span>
+        <span className="text-low font-mono">{activeRun.current_state}</span>
+        <span className="ml-auto text-low font-mono">
+          {activeRun.id.slice(0, 8)}
+        </span>
+      </div>
+      <div className="flex-1 min-h-0">
+        {graphQuery.isLoading ? (
+          <div className="text-xs text-low p-3">Loading graph…</div>
+        ) : graphQuery.data ? (
+          <ProcedureGraph
+            graph={graphQuery.data}
+            currentState={activeRun.current_state}
+            height="100%"
+          />
+        ) : (
+          <div className="text-xs text-rose-500 p-3">
+            Graph unavailable for {activeRun.procedure_name}.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function LeadAgentPage() {
   const { projectId } = useParams({
@@ -45,6 +138,17 @@ function LeadAgentPage() {
     () => (runsQuery.data ?? []).slice(0, 8),
     [runsQuery.data]
   );
+
+  // The most recent run that's still running or parked at a human gate.
+  // The side panel renders this run's procedure graph with `current_state`
+  // highlighted so the user watches the state machine advance live next to
+  // the chat. `null` when nothing is active.
+  const activeRun = useMemo(() => {
+    return (
+      (runsQuery.data ?? []).find((r) => ACTIVE_RUN_STATUSES.has(r.status)) ??
+      null
+    );
+  }, [runsQuery.data]);
 
   const [workspaceId, setWorkspaceId] = useState<string>('');
 
@@ -112,16 +216,32 @@ function LeadAgentPage() {
             </Link>
           </div>
         </header>
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {/* Inner WorkspaceProvider overrides the outer (app-root) one with
-              this project's lead-agent workspace + session, so the embedded
-              chat lands directly on the lead session. */}
-          <WorkspaceProvider
-            workspaceIdOverride={session.workspace_id}
-            initialSessionIdOverride={session.session_id}
-          >
-            <WorkspacesUi />
-          </WorkspaceProvider>
+        <div className="flex-1 min-h-0 overflow-hidden grid grid-cols-1 lg:grid-cols-[1fr_400px]">
+          <div className="min-h-0 overflow-hidden border-r">
+            {/* Inner WorkspaceProvider overrides the outer (app-root) one
+                with this project's lead-agent workspace + session, AND
+                filters the visible session list down to just the lead
+                session — so workers/user sessions don't appear in the
+                conversation list. */}
+            <WorkspaceProvider
+              workspaceIdOverride={session.workspace_id}
+              initialSessionIdOverride={session.session_id}
+              sessionIdsAllow={[session.session_id]}
+            >
+              <WorkspacesUi />
+            </WorkspaceProvider>
+          </div>
+          <aside className="min-h-0 overflow-hidden hidden lg:flex flex-col bg-zinc-50 dark:bg-zinc-950">
+            <div className="px-3 py-2 border-b text-xs font-medium uppercase tracking-wide text-low">
+              Active procedure
+            </div>
+            <div className="flex-1 min-h-0">
+              <ActiveProcedurePanel
+                projectId={projectId}
+                activeRun={activeRun}
+              />
+            </div>
+          </aside>
         </div>
       </div>
     );
