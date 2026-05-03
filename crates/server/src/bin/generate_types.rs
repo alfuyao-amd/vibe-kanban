@@ -32,6 +32,8 @@ fn generate_types_content() -> String {
         server::routes::procedure_runs::ProcedureParamSummary::decl(),
         server::routes::procedure_runs::StartProcedureRequest::decl(),
         server::routes::procedures::ProcedureSourceView::decl(),
+        server::routes::workspaces::session_roles::WorkspaceSessionRole::decl(),
+        server::routes::workspaces::session_roles::WorkspaceSessionRoleKind::decl(),
         server::routes::procedures::ProcedureGraphView::decl(),
         server::routes::procedures::ProcedureGraphNode::decl(),
         server::routes::procedures::ProcedureGraphEdge::decl(),

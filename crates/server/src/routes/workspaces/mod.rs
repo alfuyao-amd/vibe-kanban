@@ -10,6 +10,7 @@ pub mod integration;
 pub mod links;
 pub mod pr;
 pub mod repos;
+pub mod session_roles;
 pub mod streams;
 pub mod workspace_summary;
 
@@ -36,6 +37,7 @@ pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
         .nest("/integration", integration::router())
         .nest("/repos", repos::router())
         .nest("/pull-requests", pr::router())
+        .merge(session_roles::router())
         .layer(from_fn_with_state(
             deployment.clone(),
             load_workspace_middleware,

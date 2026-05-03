@@ -40,6 +40,12 @@ pub struct StateHistoryEntry {
     pub gate_summary: Option<String>,
     #[serde(default)]
     pub attempt: u32,
+    /// Session id touched by this state's action (created_session, follow_up,
+    /// start_review, merge). Persisted so the workspace-session-roles
+    /// endpoint can label each session with the procedure run it belongs to.
+    /// Nullable for old rows / pure-gate states that didn't have an action.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
@@ -117,6 +123,26 @@ impl ProcedureRun {
             .bind(history)
             .bind(data.workspace_id)
             .fetch_one(pool)
+            .await
+    }
+
+    /// All procedure runs whose initial workspace_id matched this workspace.
+    /// Used by the session-roles endpoint to label workspace sessions that
+    /// were spawned by a procedure run.
+    pub async fn list_for_workspace(
+        pool: &SqlitePool,
+        workspace_id: Uuid,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        let query = format!(
+            r#"SELECT {cols}
+               FROM procedure_runs
+               WHERE workspace_id = ?
+               ORDER BY created_at DESC"#,
+            cols = Self::COLUMNS
+        );
+        sqlx::query_as::<_, Self>(&query)
+            .bind(workspace_id)
+            .fetch_all(pool)
             .await
     }
 

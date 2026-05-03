@@ -34,7 +34,14 @@ export type ProcedureRun = { id: string, project_id: string, procedure_name: str
 
 export type ProcedureRunStatus = "running" | "awaiting_approval" | "succeeded" | "failed" | "cancelled";
 
-export type StateHistoryEntry = { state: string, entered_at: Date, exited_at: Date | null, outcome: StateOutcome | null, gate_summary: string | null, attempt: number, };
+export type StateHistoryEntry = { state: string, entered_at: Date, exited_at: Date | null, outcome: StateOutcome | null, gate_summary: string | null, attempt: number, 
+/**
+ * Session id touched by this state's action (created_session, follow_up,
+ * start_review, merge). Persisted so the workspace-session-roles
+ * endpoint can label each session with the procedure run it belongs to.
+ * Nullable for old rows / pure-gate states that didn't have an action.
+ */
+session_id: string | null, };
 
 export type StateOutcome = "success" | "failure" | "cancelled";
 
@@ -60,6 +67,25 @@ export type ProcedureSourceView = { name: string, yaml: string, source: Procedur
  * edited or deleted via the API. UIs should disable Save/Delete.
  */
 read_only: boolean, };
+
+export type WorkspaceSessionRole = { session_id: string, role: WorkspaceSessionRoleKind, 
+/**
+ * For `procedure_worker`: the run id this session belongs to. The UI
+ * uses this to group workers by run on the lead-agent dispatch page.
+ */
+run_id: string | null, 
+/**
+ * For `procedure_worker`: the run's procedure name (e.g.
+ * `feature_with_tests`).
+ */
+procedure_name: string | null, 
+/**
+ * For `lead_agent`: the project this lead agent represents. Lets the UI
+ * link back to the project's procedures editor / runs page.
+ */
+project_id: string | null, };
+
+export type WorkspaceSessionRoleKind = "lead_agent" | "procedure_worker" | "user";
 
 export type ProcedureGraphView = { name: string, initial_state: string, nodes: Array<ProcedureGraphNode>, edges: Array<ProcedureGraphEdge>, };
 

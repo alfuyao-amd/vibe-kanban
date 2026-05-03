@@ -64,7 +64,7 @@ impl DbRunStore {
 
 fn convert_entry(from: &str, to: &str, orch: &OrchEntry) -> DbEntry {
     let now = Utc::now();
-    let (outcome, gate_summary) = match &orch.event {
+    let (outcome, gate_summary, session_id) = match &orch.event {
         StateEvent::GateEvaluated { passed, summary } => (
             Some(if *passed {
                 StateOutcome::Success
@@ -72,18 +72,25 @@ fn convert_entry(from: &str, to: &str, orch: &OrchEntry) -> DbEntry {
                 StateOutcome::Failure
             }),
             Some(summary.clone()),
+            None,
         ),
-        StateEvent::ActionCompleted { action_kind, .. } => (
+        StateEvent::ActionCompleted {
+            action_kind,
+            session_id,
+            ..
+        } => (
             Some(if from == to {
                 StateOutcome::Failure
             } else {
                 StateOutcome::Success
             }),
             Some(format!("action: {action_kind}")),
+            session_id.clone(),
         ),
         StateEvent::MaxAttemptsExhausted { attempts } => (
             Some(StateOutcome::Failure),
             Some(format!("max_attempts exhausted after {attempts} tries")),
+            None,
         ),
     };
     DbEntry {
@@ -93,6 +100,7 @@ fn convert_entry(from: &str, to: &str, orch: &OrchEntry) -> DbEntry {
         outcome,
         gate_summary,
         attempt: orch.attempt,
+        session_id,
     }
 }
 

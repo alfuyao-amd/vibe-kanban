@@ -7,6 +7,14 @@ import type { Session } from 'shared/types';
 
 interface UseWorkspaceSessionsOptions {
   enabled?: boolean;
+  /**
+   * Pre-select this session id when the workspace first loads (or when
+   * switching workspaces). Used by deep-links like
+   * `/workspaces/<id>?session=<sid>` so callers can land on a specific
+   * session rather than the most-recently-used one. If the id isn't in the
+   * fetched sessions list, falls back to first-session selection.
+   */
+  initialSessionId?: string | null;
 }
 
 /** Discriminated union for session selection state */
@@ -37,11 +45,15 @@ export function useWorkspaceSessions(
   options: UseWorkspaceSessionsOptions = {}
 ): UseWorkspaceSessionsResult {
   const hostId = useHostId();
-  const { enabled = true } = options;
+  const { enabled = true, initialSessionId = null } = options;
   const [selection, setSelection] = useState<SessionSelection | undefined>(
     undefined
   );
   const prevWorkspaceIdRef = useRef(workspaceId);
+  // One-shot consumption: once an initialSessionId has been honoured for a
+  // given workspace mount, ignore further changes (e.g. user clicking a
+  // different session in the list) so we don't keep snapping back.
+  const consumedInitialRef = useRef(false);
 
   const { data: sessions = [], isLoading } = useQuery<Session[]>({
     queryKey: workspaceSessionKeys.byWorkspace(workspaceId, hostId),
@@ -55,19 +67,32 @@ export function useWorkspaceSessions(
   useEffect(() => {
     const workspaceChanged = prevWorkspaceIdRef.current !== workspaceId;
     prevWorkspaceIdRef.current = workspaceId;
+    if (workspaceChanged) {
+      consumedInitialRef.current = false;
+    }
 
     if (sessions.length > 0) {
-      // Sessions are ordered by most recently used, so first is the most recently used
-      // Always select first session when sessions are available for this workspace
-      // Only preserve new session mode within the same workspace
+      // Sessions are ordered by most recently used, so first is the most recently used.
+      // Honour `initialSessionId` (deep-link) the first time it lands in a
+      // matching session list; afterwards leave selection alone so user
+      // interaction wins.
       setSelection((prev) => {
         if (prev?.mode === 'new' && !workspaceChanged) return prev;
+        if (
+          !consumedInitialRef.current &&
+          initialSessionId &&
+          sessions.some((s) => s.id === initialSessionId)
+        ) {
+          consumedInitialRef.current = true;
+          return { mode: 'existing', sessionId: initialSessionId };
+        }
+        if (prev?.mode === 'existing' && !workspaceChanged) return prev;
         return { mode: 'existing', sessionId: sessions[0].id };
       });
     } else {
       setSelection(undefined);
     }
-  }, [workspaceId, sessions]);
+  }, [workspaceId, sessions, initialSessionId]);
 
   const isNewSessionMode = selection?.mode === 'new' || sessions.length === 0;
   const selectedSessionId =

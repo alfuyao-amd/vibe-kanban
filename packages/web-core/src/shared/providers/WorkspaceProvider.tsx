@@ -1,5 +1,5 @@
 import { ReactNode, useMemo, useCallback, useEffect, useRef } from 'react';
-import { useParams } from '@tanstack/react-router';
+import { useParams, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWorkspaces } from '@/shared/hooks/useWorkspaces';
 import { workspaceSummaryKeys } from '@/shared/hooks/workspaceSummaryKeys';
@@ -22,6 +22,14 @@ interface WorkspaceProviderProps {
 
 export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
   const { workspaceId } = useParams({ strict: false });
+  // Pulled non-strictly because WorkspaceProvider mounts at the app root and
+  // most routes don't declare a `session` search param. The unknown-shape
+  // record is fine here — we just look up the optional string.
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const initialSessionId =
+    typeof search?.session === 'string' && search.session.length > 0
+      ? search.session
+      : null;
   const appNavigation = useAppNavigation();
   const currentDestination = useCurrentAppDestination();
   const queryClient = useQueryClient();
@@ -48,7 +56,10 @@ export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
     isLoading: isSessionsLoading,
     isNewSessionMode,
     startNewSession,
-  } = useWorkspaceSessions(workspaceId, { enabled: !isCreateMode });
+  } = useWorkspaceSessions(workspaceId, {
+    enabled: !isCreateMode,
+    initialSessionId,
+  });
 
   const { repos, isLoading: isReposLoading } = useWorkspaceRepo(workspaceId, {
     enabled: !isCreateMode,

@@ -48,6 +48,24 @@ impl ProjectLeadAgent {
             .await
     }
 
+    /// All lead-agent records whose bound workspace matches `workspace_id`.
+    /// In practice this is at most one (a workspace can host the lead agent
+    /// for only one project today), but the query is shaped as a list so
+    /// callers don't have to assume cardinality.
+    pub async fn list_for_workspace(
+        pool: &SqlitePool,
+        workspace_id: Uuid,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        let query = format!(
+            r#"SELECT {cols} FROM project_lead_agents WHERE workspace_id = ?"#,
+            cols = Self::COLUMNS
+        );
+        sqlx::query_as::<_, Self>(&query)
+            .bind(workspace_id)
+            .fetch_all(pool)
+            .await
+    }
+
     pub async fn upsert(
         pool: &SqlitePool,
         project_id: Uuid,
