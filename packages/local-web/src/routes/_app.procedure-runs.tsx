@@ -397,13 +397,22 @@ function ProcedureRunsList() {
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold">Procedure runs</h1>
           {projectId && (
-            <Link
-              to="/projects/$projectId/lead-agent"
-              params={{ projectId }}
-              className="rounded border border-blue-600 text-blue-600 hover:bg-blue-600/10 text-xs px-3 py-1.5"
-            >
-              Open lead agent →
-            </Link>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/projects/$projectId/procedures"
+                params={{ projectId }}
+                className="rounded border text-xs px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+              >
+                Procedures →
+              </Link>
+              <Link
+                to="/projects/$projectId/lead-agent"
+                params={{ projectId }}
+                className="rounded border border-blue-600 text-blue-600 hover:bg-blue-600/10 text-xs px-3 py-1.5"
+              >
+                Open lead agent →
+              </Link>
+            </div>
           )}
         </div>
         <p className="text-sm text-low mt-1">

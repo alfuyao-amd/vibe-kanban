@@ -14,6 +14,7 @@ import {
   SpinnerIcon,
   StarIcon,
   PlayCircleIcon,
+  TreeStructureIcon,
   type Icon,
 } from '@phosphor-icons/react';
 import { cn } from '../lib/cn';
@@ -55,6 +56,9 @@ interface AppBarProps {
   onProcedureRunsClick?: () => void;
   isProcedureRunsActive?: boolean;
   showProcedureRunsButton?: boolean;
+  onProceduresClick?: () => void;
+  isProceduresActive?: boolean;
+  showProceduresButton?: boolean;
   onHostClick?: (hostId: string, status: AppBarHostStatus) => void;
   showWorkspacesButton?: boolean;
   onProjectClick: (projectId: string) => void;
@@ -210,6 +214,9 @@ export function AppBar({
   onProcedureRunsClick,
   isProcedureRunsActive = false,
   showProcedureRunsButton = true,
+  onProceduresClick,
+  isProceduresActive = false,
+  showProceduresButton = true,
   onHostClick,
   showWorkspacesButton = true,
   onProjectClick,
@@ -247,6 +254,16 @@ export function AppBar({
         onClick: onWorkspacesClick,
       },
     ];
+    if (showProceduresButton && onProceduresClick) {
+      localItems.push({
+        key: 'local-procedures',
+        kind: 'icon-button',
+        label: 'Procedures',
+        icon: TreeStructureIcon,
+        isActive: isProceduresActive,
+        onClick: onProceduresClick,
+      });
+    }
     if (showProcedureRunsButton && onProcedureRunsClick) {
       localItems.push({
         key: 'local-procedure-runs',

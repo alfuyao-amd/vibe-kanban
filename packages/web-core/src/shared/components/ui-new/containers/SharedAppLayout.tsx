@@ -178,8 +178,11 @@ export function SharedAppLayout() {
   );
   const isWorkspacesActive = isLocalWorkspacesDestination(currentDestination);
   const isExportActive = currentDestination?.kind === 'export';
-  const isProcedureRunsActive =
-    useLocation().pathname.startsWith('/procedure-runs');
+  const currentPathname = useLocation().pathname;
+  const isProcedureRunsActive = currentPathname.startsWith('/procedure-runs');
+  const isProceduresActive = /^\/projects\/[^/]+\/procedures(\/|$)/.test(
+    currentPathname
+  );
   const showCloudShutdownBanner =
     isExportActive || (isSignedIn && isProjectDestination(currentDestination));
   const isWorkspaceSidebarPreviewEnabled =
@@ -215,6 +218,26 @@ export function SharedAppLayout() {
     const targetProjectId = activeProjectId ?? fallbackProjectId;
     const search = targetProjectId ? { projectId: targetProjectId } : {};
     void navigate({ to: '/procedure-runs', search });
+  }, [navigate, activeProjectId]);
+
+  const handleProceduresClick = useCallback(() => {
+    // The procedures editor is project-scoped (lives under
+    // /projects/$projectId/procedures), so it needs a project to land on.
+    // Same fallback rule as procedure runs: current URL > last-used project.
+    // If the user has no project context at all, drop them on /procedure-runs
+    // (the closest neutral landing) rather than guessing a random project.
+    const fallbackProjectId =
+      useUiPreferencesStore.getState().selectedProjectId ?? null;
+    const targetProjectId = activeProjectId ?? fallbackProjectId;
+    if (!targetProjectId) {
+      void navigate({ to: '/procedure-runs', search: {} });
+      return;
+    }
+    void navigate({
+      to: '/projects/$projectId/procedures',
+      params: { projectId: targetProjectId },
+      search: {},
+    });
   }, [navigate, activeProjectId]);
 
   const handleExportClick = useCallback(() => {
@@ -355,6 +378,8 @@ export function SharedAppLayout() {
               onCreateProject={handleCreateProject}
               onExportClick={handleExportClick}
               onWorkspacesClick={handleWorkspacesClick}
+              onProceduresClick={handleProceduresClick}
+              isProceduresActive={isProceduresActive}
               onProcedureRunsClick={handleProcedureRunsClick}
               isProcedureRunsActive={isProcedureRunsActive}
               onHostClick={handleHostClick}
