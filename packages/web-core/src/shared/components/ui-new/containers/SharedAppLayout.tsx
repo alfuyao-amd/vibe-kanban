@@ -195,6 +195,9 @@ export function SharedAppLayout() {
   const isProceduresActive = /^\/projects\/[^/]+\/procedures(\/|$)/.test(
     currentPathname
   );
+  const isLeadAgentActive = /^\/projects\/[^/]+\/lead-agent(\/|$)/.test(
+    currentPathname
+  );
   const showCloudShutdownBanner =
     isExportActive || (isSignedIn && isProjectDestination(currentDestination));
   const isWorkspaceSidebarPreviewEnabled =
@@ -231,6 +234,29 @@ export function SharedAppLayout() {
     const search = targetProjectId ? { projectId: targetProjectId } : {};
     void navigate({ to: '/procedure-runs', search });
   }, [navigate, activeProjectId]);
+
+  const handleLeadAgentClick = useCallback(() => {
+    // Same project-fallback chain as Procedures (the lead-agent page is
+    // also project-scoped). Lands on /projects/<id>/lead-agent which now
+    // hosts the embedded chat for the project's lead-agent session.
+    const fallbackProjectId =
+      useUiPreferencesStore.getState().selectedProjectId ?? null;
+    const firstOrgProjectId = orderedProjects[0]?.id ?? null;
+    const firstLocalProjectId = localProjects[0]?.id ?? null;
+    const targetProjectId =
+      activeProjectId ??
+      fallbackProjectId ??
+      firstOrgProjectId ??
+      firstLocalProjectId;
+    if (!targetProjectId) {
+      void navigate({ to: '/procedure-runs', search: {} });
+      return;
+    }
+    void navigate({
+      to: '/projects/$projectId/lead-agent',
+      params: { projectId: targetProjectId },
+    });
+  }, [navigate, activeProjectId, orderedProjects, localProjects]);
 
   const handleProceduresClick = useCallback(() => {
     // The procedures editor is project-scoped (lives under
@@ -396,6 +422,8 @@ export function SharedAppLayout() {
               onCreateProject={handleCreateProject}
               onExportClick={handleExportClick}
               onWorkspacesClick={handleWorkspacesClick}
+              onLeadAgentClick={handleLeadAgentClick}
+              isLeadAgentActive={isLeadAgentActive}
               onProceduresClick={handleProceduresClick}
               isProceduresActive={isProceduresActive}
               onProcedureRunsClick={handleProcedureRunsClick}

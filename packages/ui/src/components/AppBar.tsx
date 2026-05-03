@@ -15,6 +15,7 @@ import {
   StarIcon,
   PlayCircleIcon,
   TreeStructureIcon,
+  RobotIcon,
   type Icon,
 } from '@phosphor-icons/react';
 import { cn } from '../lib/cn';
@@ -59,6 +60,9 @@ interface AppBarProps {
   onProceduresClick?: () => void;
   isProceduresActive?: boolean;
   showProceduresButton?: boolean;
+  onLeadAgentClick?: () => void;
+  isLeadAgentActive?: boolean;
+  showLeadAgentButton?: boolean;
   onHostClick?: (hostId: string, status: AppBarHostStatus) => void;
   showWorkspacesButton?: boolean;
   onProjectClick: (projectId: string) => void;
@@ -217,6 +221,9 @@ export function AppBar({
   onProceduresClick,
   isProceduresActive = false,
   showProceduresButton = true,
+  onLeadAgentClick,
+  isLeadAgentActive = false,
+  showLeadAgentButton = true,
   onHostClick,
   showWorkspacesButton = true,
   onProjectClick,
@@ -254,6 +261,16 @@ export function AppBar({
         onClick: onWorkspacesClick,
       },
     ];
+    if (showLeadAgentButton && onLeadAgentClick) {
+      localItems.push({
+        key: 'local-lead-agent',
+        kind: 'icon-button',
+        label: 'Lead agent',
+        icon: RobotIcon,
+        isActive: isLeadAgentActive,
+        onClick: onLeadAgentClick,
+      });
+    }
     if (showProceduresButton && onProceduresClick) {
       localItems.push({
         key: 'local-procedures',

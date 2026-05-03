@@ -18,18 +18,41 @@ import { WorkspaceContext } from '@/shared/hooks/useWorkspaceContext';
 
 interface WorkspaceProviderProps {
   children: ReactNode;
+  /**
+   * Mount the provider against this workspace_id instead of the URL's
+   * `workspaceId` route param. Used by routes that need to host the
+   * workspace UI without owning the workspace URL — e.g. the lead-agent
+   * page embeds the chat for a project's bound workspace at
+   * `/projects/:id/lead-agent`. A nested `WorkspaceProvider` with this prop
+   * overrides the outer (app-root) one for its subtree, which is how the
+   * lead-agent route shows the lead session inline without redirecting.
+   */
+  workspaceIdOverride?: string | null;
+  /**
+   * Pre-select this session id at mount, ignoring the `?session=` URL
+   * search param. The lead-agent route uses this to pin the lead session;
+   * regular workspace routes leave it undefined and fall back to URL.
+   */
+  initialSessionIdOverride?: string | null;
 }
 
-export function WorkspaceProvider({ children }: WorkspaceProviderProps) {
-  const { workspaceId } = useParams({ strict: false });
+export function WorkspaceProvider({
+  children,
+  workspaceIdOverride,
+  initialSessionIdOverride,
+}: WorkspaceProviderProps) {
+  const { workspaceId: routeWorkspaceId } = useParams({ strict: false });
+  const workspaceId = workspaceIdOverride ?? routeWorkspaceId;
   // Pulled non-strictly because WorkspaceProvider mounts at the app root and
   // most routes don't declare a `session` search param. The unknown-shape
   // record is fine here — we just look up the optional string.
   const search = useSearch({ strict: false }) as Record<string, unknown>;
   const initialSessionId =
-    typeof search?.session === 'string' && search.session.length > 0
-      ? search.session
-      : null;
+    initialSessionIdOverride !== undefined
+      ? initialSessionIdOverride
+      : typeof search?.session === 'string' && search.session.length > 0
+        ? search.session
+        : null;
   const appNavigation = useAppNavigation();
   const currentDestination = useCurrentAppDestination();
   const queryClient = useQueryClient();
