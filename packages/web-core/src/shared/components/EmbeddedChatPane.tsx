@@ -1,3 +1,4 @@
+import { ExecutionProcessesProvider } from '@/shared/providers/ExecutionProcessesProvider';
 import { ReviewProvider } from '@/shared/hooks/ReviewProvider';
 import { useWorkspaceContext } from '@/shared/hooks/useWorkspaceContext';
 import { WorkspacesMainContainer } from '@/pages/workspaces/WorkspacesMainContainer';
@@ -14,6 +15,12 @@ import { WorkspacesMainContainer } from '@/pages/workspaces/WorkspacesMainContai
  *
  * Pulls all data from the surrounding `WorkspaceProvider`. Mount inside an
  * override-props `WorkspaceProvider` to pin the workspace + session.
+ *
+ * IMPORTANT: also remounts an `ExecutionProcessesProvider` keyed off the
+ * inner provider's `selectedSessionId`. The app-root mount of that
+ * provider reads from the OUTER (URL-driven) WorkspaceProvider, which has
+ * no session on non-workspace routes, so chat messages would stream to
+ * nowhere without this re-wrap.
  */
 export function EmbeddedChatPane() {
   const {
@@ -30,21 +37,23 @@ export function EmbeddedChatPane() {
   } = useWorkspaceContext();
 
   return (
-    <ReviewProvider workspaceId={selectedWorkspace?.id}>
-      <div className="flex flex-col h-full min-h-0">
-        <WorkspacesMainContainer
-          selectedWorkspace={selectedWorkspace ?? null}
-          selectedSession={selectedSession}
-          selectedSessionId={selectedSessionId}
-          sessions={sessions}
-          repos={repos}
-          onSelectSession={selectSession}
-          isLoading={isLoading}
-          isSessionsLoading={isSessionsLoading}
-          isNewSessionMode={isNewSessionMode}
-          onStartNewSession={startNewSession}
-        />
-      </div>
-    </ReviewProvider>
+    <ExecutionProcessesProvider sessionId={selectedSessionId}>
+      <ReviewProvider workspaceId={selectedWorkspace?.id}>
+        <div className="flex flex-col h-full min-h-0">
+          <WorkspacesMainContainer
+            selectedWorkspace={selectedWorkspace ?? null}
+            selectedSession={selectedSession}
+            selectedSessionId={selectedSessionId}
+            sessions={sessions}
+            repos={repos}
+            onSelectSession={selectSession}
+            isLoading={isLoading}
+            isSessionsLoading={isSessionsLoading}
+            isNewSessionMode={isNewSessionMode}
+            onStartNewSession={startNewSession}
+          />
+        </div>
+      </ReviewProvider>
+    </ExecutionProcessesProvider>
   );
 }
