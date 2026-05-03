@@ -223,12 +223,14 @@ export function SharedAppLayout() {
   const handleProceduresClick = useCallback(() => {
     // The procedures editor is project-scoped (lives under
     // /projects/$projectId/procedures), so it needs a project to land on.
-    // Same fallback rule as procedure runs: current URL > last-used project.
-    // If the user has no project context at all, drop them on /procedure-runs
-    // (the closest neutral landing) rather than guessing a random project.
+    // Fallback chain: current URL > last-used project > first project in
+    // the org. Only drop to /procedure-runs when the org has zero projects
+    // (in which case there's literally nothing for the editor to show).
     const fallbackProjectId =
       useUiPreferencesStore.getState().selectedProjectId ?? null;
-    const targetProjectId = activeProjectId ?? fallbackProjectId;
+    const firstProjectId = orderedProjects[0]?.id ?? null;
+    const targetProjectId =
+      activeProjectId ?? fallbackProjectId ?? firstProjectId;
     if (!targetProjectId) {
       void navigate({ to: '/procedure-runs', search: {} });
       return;
@@ -238,7 +240,7 @@ export function SharedAppLayout() {
       params: { projectId: targetProjectId },
       search: {},
     });
-  }, [navigate, activeProjectId]);
+  }, [navigate, activeProjectId, orderedProjects]);
 
   const handleExportClick = useCallback(() => {
     appNavigation.goToExport();
