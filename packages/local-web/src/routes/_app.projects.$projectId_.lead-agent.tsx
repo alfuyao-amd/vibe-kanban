@@ -8,7 +8,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { leadAgentApi, proceduresApi, workspacesApi } from '@/shared/lib/api';
 import { WorkspaceProvider } from '@/shared/providers/WorkspaceProvider';
-import { Workspaces as WorkspacesUi } from '@/pages/workspaces/Workspaces';
+import { EmbeddedChatPane } from '@/shared/components/EmbeddedChatPane';
 import { ProcedureGraph } from '@web/shared/ProcedureGraph';
 import type {
   LeadAgentSession,
@@ -228,7 +228,7 @@ function LeadAgentPage() {
               initialSessionIdOverride={session.session_id}
               sessionIdsAllow={[session.session_id]}
             >
-              <WorkspacesUi />
+              <EmbeddedChatPane />
             </WorkspaceProvider>
           </div>
           <aside className="min-h-0 overflow-hidden hidden lg:flex flex-col bg-zinc-50 dark:bg-zinc-950">
