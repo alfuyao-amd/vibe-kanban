@@ -49,6 +49,8 @@ import { CommandBarDialog } from '@/shared/dialogs/command-bar/CommandBarDialog'
 import { useCommandBarShortcut } from '@/shared/hooks/useCommandBarShortcut';
 import { useWorkspaceSidebarPreviewController } from '@/shared/hooks/useWorkspaceSidebarPreviewController';
 import { useShape } from '@/shared/integrations/electric/hooks';
+import { useQuery } from '@tanstack/react-query';
+import { projectsApi } from '@/shared/lib/api';
 import { sortProjectsByOrder } from '@/shared/lib/projectOrder';
 import {
   PROJECT_MUTATION,
@@ -141,6 +143,16 @@ export function SharedAppLayout() {
     () => sortProjectsByOrder(orgProjects),
     [orgProjects]
   );
+
+  // Local backend's /api/projects. The remote/electric `orgProjects` shape is
+  // empty in local-only mode (no signed-in org), so the AppBar's
+  // project-dependent buttons (e.g. "Procedures") need a separate fallback
+  // source. Keeping this query alongside `orgProjects` rather than swapping
+  // for it avoids touching the existing project-display path.
+  const { data: localProjects = [] } = useQuery({
+    queryKey: ['layout-local-projects'],
+    queryFn: () => projectsApi.list(),
+  });
   const [orderedProjects, setOrderedProjects] =
     useState<RemoteProject[]>(sortedProjects);
   const [isSavingProjectOrder, setIsSavingProjectOrder] = useState(false);
@@ -224,13 +236,17 @@ export function SharedAppLayout() {
     // The procedures editor is project-scoped (lives under
     // /projects/$projectId/procedures), so it needs a project to land on.
     // Fallback chain: current URL > last-used project > first project in
-    // the org. Only drop to /procedure-runs when the org has zero projects
-    // (in which case there's literally nothing for the editor to show).
+    // the org > first local-backend project. Only drop to /procedure-runs
+    // when there's literally no project anywhere.
     const fallbackProjectId =
       useUiPreferencesStore.getState().selectedProjectId ?? null;
-    const firstProjectId = orderedProjects[0]?.id ?? null;
+    const firstOrgProjectId = orderedProjects[0]?.id ?? null;
+    const firstLocalProjectId = localProjects[0]?.id ?? null;
     const targetProjectId =
-      activeProjectId ?? fallbackProjectId ?? firstProjectId;
+      activeProjectId ??
+      fallbackProjectId ??
+      firstOrgProjectId ??
+      firstLocalProjectId;
     if (!targetProjectId) {
       void navigate({ to: '/procedure-runs', search: {} });
       return;
@@ -240,7 +256,7 @@ export function SharedAppLayout() {
       params: { projectId: targetProjectId },
       search: {},
     });
-  }, [navigate, activeProjectId, orderedProjects]);
+  }, [navigate, activeProjectId, orderedProjects, localProjects]);
 
   const handleExportClick = useCallback(() => {
     appNavigation.goToExport();
