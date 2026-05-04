@@ -234,6 +234,18 @@ impl HumanApprovalSource for RegistryApproval {
         {
             tracing::warn!(run_id = %self.run_id, %err, "failed to set awaiting_approval");
         }
+        // Fire-and-forget notification — same hook as on terminal so the
+        // user finds out from the lead agent that a run needs approval.
+        let pool_for_notify = self.pool.clone();
+        let run_id = self.run_id;
+        let prompt_for_notify = prompt.to_string();
+        tokio::spawn(async move {
+            if let Err(err) =
+                notify_lead_agent_awaiting(&pool_for_notify, run_id, &prompt_for_notify).await
+            {
+                tracing::warn!(?run_id, %err, "lead-agent notification on awaiting_approval failed");
+            }
+        });
         let result = {
             let mut guard = self.rx.lock().await;
             guard.recv().await.ok_or(GateError::ApprovalChannelClosed)?
@@ -856,19 +868,10 @@ async fn notify_lead_agent_terminal(
     procedure_name: &str,
     label: &str,
 ) -> Result<(), String> {
-    use db::models::project_lead_agent::ProjectLeadAgent;
     let run = ProcedureRun::find_by_id(pool, run_id)
         .await
         .map_err(|e| format!("load run: {e}"))?
         .ok_or_else(|| "run row vanished after terminal".to_string())?;
-    let lead = match ProjectLeadAgent::find_for_project(pool, run.project_id)
-        .await
-        .map_err(|e| format!("load lead agent: {e}"))?
-    {
-        Some(l) => l,
-        None => return Ok(()), // Project has no lead agent; nothing to notify.
-    };
-    let backend = VkApiBackend::from_env().map_err(|e| format!("backend url: {e}"))?;
     let prompt = format!(
         "[procedure-runtime] Run {} ({procedure_name}) finished: {label}. \
          final_state={}. (System event from the runtime — surface to the \
@@ -876,8 +879,54 @@ async fn notify_lead_agent_terminal(
         &run_id.to_string()[..8],
         run.current_state,
     );
+    notify_lead_agent_for_run(pool, &run, &prompt).await
+}
+
+/// Same idea as `notify_lead_agent_terminal` but for the moment a run
+/// parks at a human-approval gate. Lets the lead agent surface the
+/// pending decision to the user (e.g. "Run X is waiting on approval —
+/// want me to approve?"). The gate's prompt text is included so the
+/// agent can paraphrase what's being approved.
+async fn notify_lead_agent_awaiting(
+    pool: &SqlitePool,
+    run_id: Uuid,
+    gate_prompt: &str,
+) -> Result<(), String> {
+    let run = ProcedureRun::find_by_id(pool, run_id)
+        .await
+        .map_err(|e| format!("load run: {e}"))?
+        .ok_or_else(|| "run row vanished".to_string())?;
+    let prompt = format!(
+        "[procedure-runtime] Run {} ({}) is awaiting human approval at \
+         state `{}`. Gate prompt: \"{gate_prompt}\". You can call \
+         `approve_procedure_run` or `reject_procedure_run` with run_id={} \
+         once the user gives the go-ahead. Surface this to the user.",
+        &run_id.to_string()[..8],
+        run.procedure_name,
+        run.current_state,
+        run_id,
+    );
+    notify_lead_agent_for_run(pool, &run, &prompt).await
+}
+
+/// Shared plumbing: find the project's lead-agent session and POST a
+/// follow-up. Silent no-op when there's no lead agent.
+async fn notify_lead_agent_for_run(
+    pool: &SqlitePool,
+    run: &ProcedureRun,
+    prompt: &str,
+) -> Result<(), String> {
+    use db::models::project_lead_agent::ProjectLeadAgent;
+    let lead = match ProjectLeadAgent::find_for_project(pool, run.project_id)
+        .await
+        .map_err(|e| format!("load lead agent: {e}"))?
+    {
+        Some(l) => l,
+        None => return Ok(()),
+    };
+    let backend = VkApiBackend::from_env().map_err(|e| format!("backend url: {e}"))?;
     backend
-        .follow_up(SessionId(lead.session_id.to_string()), None, &prompt)
+        .follow_up(SessionId(lead.session_id.to_string()), None, prompt)
         .await
         .map_err(|e| format!("follow-up: {e}"))?;
     Ok(())

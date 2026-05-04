@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  createFileRoute,
-  Link,
-  useNavigate,
-  useParams,
-} from '@tanstack/react-router';
+import { createFileRoute, Link, useParams } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { leadAgentApi, proceduresApi, workspacesApi } from '@/shared/lib/api';
 import { WorkspaceProvider } from '@/shared/providers/WorkspaceProvider';
@@ -119,7 +114,6 @@ function LeadAgentPage() {
   const { projectId } = useParams({
     from: '/_app/projects/$projectId_/lead-agent',
   });
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const sessionQuery = useQuery<LeadAgentSession | null>({
@@ -179,13 +173,12 @@ function LeadAgentPage() {
   const startMutation = useMutation({
     mutationFn: () =>
       leadAgentApi.startSession(projectId, { workspace_id: workspaceId }),
-    onSuccess: (session) => {
+    onSuccess: () => {
+      // Just invalidate the session query — the page re-renders with the
+      // embedded chat in place. No navigate, so the user stays on
+      // /projects/<id>/lead-agent (the lead-agent surface itself).
       queryClient.invalidateQueries({
         queryKey: ['lead-agent-session', projectId],
-      });
-      navigate({
-        to: '/workspaces/$workspaceId',
-        params: { workspaceId: session.workspace_id },
       });
     },
   });
