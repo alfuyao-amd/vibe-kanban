@@ -38,28 +38,48 @@ function statusBadgeClass(status: string): string {
   }
 }
 
-/** Side panel: live state-machine view of whatever procedure is active for
- *  this project. Pulls the active run + its graph and re-renders as the run
- *  advances. Designed to live alongside the embedded chat so the user can
- *  watch the agent talk AND watch the procedure transition simultaneously.
+/** Side panel: live state-machine view of whatever procedures are active
+ *  for this project. Renders a tab per run (so the user can flip between
+ *  concurrent runs at a glance) plus a graph below for the selected one,
+ *  with `current_state` highlighted in amber. Empty state when nothing is
+ *  active. Lives alongside the embedded chat so the user can watch the
+ *  agent talk AND watch the procedures transition simultaneously.
  */
 function ActiveProcedurePanel({
   projectId,
-  activeRun,
+  runs,
 }: {
   projectId: string;
-  activeRun: ProcedureRun | null;
+  runs: ProcedureRun[];
 }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (runs.length === 0) {
+      setSelectedId(null);
+      return;
+    }
+    // Keep current selection if still in the list; otherwise default to
+    // the first (most recently updated) run. The user's pick wins until
+    // that run drops out.
+    const stillValid = selectedId && runs.some((r) => r.id === selectedId);
+    if (!stillValid) {
+      setSelectedId(runs[0].id);
+    }
+  }, [runs, selectedId]);
+
+  const selected = runs.find((r) => r.id === selectedId) ?? runs[0] ?? null;
+
   const graphQuery = useQuery<ProcedureGraphView | null>({
-    queryKey: ['procedure-graph', projectId, activeRun?.procedure_name ?? null],
+    queryKey: ['procedure-graph', projectId, selected?.procedure_name ?? null],
     queryFn: async () =>
-      activeRun
-        ? proceduresApi.getProcedureGraph(projectId, activeRun.procedure_name)
+      selected
+        ? proceduresApi.getProcedureGraph(projectId, selected.procedure_name)
         : null,
-    enabled: !!activeRun,
+    enabled: !!selected,
   });
 
-  if (!activeRun) {
+  if (!selected) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-center text-xs text-low p-6">
         <div className="font-medium mb-1">No active procedure</div>
@@ -73,22 +93,47 @@ function ActiveProcedurePanel({
 
   return (
     <div className="h-full flex flex-col">
+      {runs.length > 1 && (
+        <div className="px-2 pt-2 flex flex-wrap gap-1 border-b pb-2">
+          {runs.map((r) => {
+            const isSelected = r.id === selected.id;
+            return (
+              <button
+                key={r.id}
+                onClick={() => setSelectedId(r.id)}
+                className={`text-[11px] rounded px-2 py-1 border ${
+                  isSelected
+                    ? 'bg-zinc-200 dark:bg-zinc-800 font-medium'
+                    : 'hover:bg-zinc-100 dark:hover:bg-zinc-900'
+                }`}
+                title={`${r.procedure_name} · ${r.status} · state=${r.current_state}`}
+              >
+                <span
+                  className={`inline-block w-1.5 h-1.5 rounded-full mr-1 align-middle ${statusDotClass(r.status)}`}
+                />
+                {r.procedure_name}
+                <span className="text-low ml-1">{r.id.slice(0, 4)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="px-3 py-2 border-b text-xs flex items-center gap-2">
         <Link
           to="/procedure-runs/$runId"
-          params={{ runId: activeRun.id }}
+          params={{ runId: selected.id }}
           className="font-medium hover:underline"
         >
-          {activeRun.procedure_name}
+          {selected.procedure_name}
         </Link>
         <span
-          className={`rounded px-1.5 py-0.5 text-[10px] ${statusBadgeClass(activeRun.status)}`}
+          className={`rounded px-1.5 py-0.5 text-[10px] ${statusBadgeClass(selected.status)}`}
         >
-          {activeRun.status}
+          {selected.status}
         </span>
-        <span className="text-low font-mono">{activeRun.current_state}</span>
+        <span className="text-low font-mono">{selected.current_state}</span>
         <span className="ml-auto text-low font-mono">
-          {activeRun.id.slice(0, 8)}
+          {selected.id.slice(0, 8)}
         </span>
       </div>
       <div className="flex-1 min-h-0">
@@ -97,17 +142,34 @@ function ActiveProcedurePanel({
         ) : graphQuery.data ? (
           <ProcedureGraph
             graph={graphQuery.data}
-            currentState={activeRun.current_state}
+            currentState={selected.current_state}
             height="100%"
           />
         ) : (
           <div className="text-xs text-rose-500 p-3">
-            Graph unavailable for {activeRun.procedure_name}.
+            Graph unavailable for {selected.procedure_name}.
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function statusDotClass(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'bg-blue-500';
+    case 'awaiting_approval':
+      return 'bg-amber-500';
+    case 'succeeded':
+      return 'bg-emerald-500';
+    case 'failed':
+      return 'bg-rose-500';
+    case 'cancelled':
+      return 'bg-zinc-400';
+    default:
+      return 'bg-zinc-400';
+  }
 }
 
 function LeadAgentPage() {
@@ -139,22 +201,22 @@ function LeadAgentPage() {
     [runsQuery.data]
   );
 
-  // The run shown in the side panel. Picks an actively-running run when
-  // there is one; otherwise lingers on a recently-terminal run for a few
-  // seconds so the user catches the success / failure rather than seeing
-  // the panel snap back to empty the moment the state machine ends.
-  const activeRun = useMemo(() => {
+  // Runs shown in the side panel: every actively-running run, plus any
+  // run that hit a terminal state in the last few seconds (so the user
+  // catches the success / failure badge before the row clears). Ordered
+  // newest first because `listRunsForProject` already returns DESC by
+  // updated_at and the runs query refetches every 5s.
+  const panelRuns = useMemo(() => {
     const runs = runsQuery.data ?? [];
-    const active = runs.find((r) => ACTIVE_RUN_STATUSES.has(r.status));
-    if (active) return active;
     const now = Date.now();
-    return (
-      runs.find((r) => {
-        if (!TERMINAL_RUN_STATUSES.has(r.status)) return false;
+    return runs.filter((r) => {
+      if (ACTIVE_RUN_STATUSES.has(r.status)) return true;
+      if (TERMINAL_RUN_STATUSES.has(r.status)) {
         const finishedAt = new Date(r.updated_at).getTime();
         return now - finishedAt < TERMINAL_LINGER_MS;
-      }) ?? null
-    );
+      }
+      return false;
+    });
   }, [runsQuery.data]);
 
   const [workspaceId, setWorkspaceId] = useState<string>('');
@@ -242,10 +304,7 @@ function LeadAgentPage() {
               Active procedure
             </div>
             <div className="flex-1 min-h-0">
-              <ActiveProcedurePanel
-                projectId={projectId}
-                activeRun={activeRun}
-              />
+              <ActiveProcedurePanel projectId={projectId} runs={panelRuns} />
             </div>
           </aside>
         </div>

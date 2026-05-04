@@ -39,7 +39,33 @@ export function EmbeddedChatPane() {
   return (
     <ExecutionProcessesProvider sessionId={selectedSessionId}>
       <ReviewProvider workspaceId={selectedWorkspace?.id}>
-        <div className="flex flex-col h-full min-h-0">
+        <div
+          className="flex flex-col h-full min-h-0 vk-embedded-chat-concise"
+          data-conversation-density="concise"
+        >
+          {/* Visual hierarchy for the embedded chat: agent's user-facing
+              message stands out; the model's intermediate thinking and
+              tool calls fade so the user's eye lands on the conversation
+              first. Targets data-entry-kind from DisplayConversationEntry.
+              Scoped to .vk-embedded-chat-concise so the regular workspace
+              chat is unaffected. */}
+          <style>{`
+            .vk-embedded-chat-concise [data-entry-kind="thinking"] {
+              opacity: 0.55;
+              font-style: italic;
+            }
+            .vk-embedded-chat-concise [data-entry-kind="tool_use"] {
+              opacity: 0.7;
+            }
+            .vk-embedded-chat-concise [data-entry-kind="assistant_message"] {
+              border-left: 3px solid rgb(59 130 246 / 0.6);
+              padding-left: 0.5rem;
+              margin-left: -0.625rem;
+            }
+            .vk-embedded-chat-concise [data-entry-kind="assistant_message"] :where(p, li, h1, h2, h3) {
+              font-weight: 500;
+            }
+          `}</style>
           <WorkspacesMainContainer
             selectedWorkspace={selectedWorkspace ?? null}
             selectedSession={selectedSession}

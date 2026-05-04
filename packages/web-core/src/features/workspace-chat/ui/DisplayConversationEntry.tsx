@@ -345,6 +345,51 @@ function DisplayConversationEntry(props: Props) {
 
   const entryType = entry.entry_type;
 
+  const renderedEntry: React.ReactNode = renderEntryByType(entryType, entry, {
+    props,
+    t,
+    expansionKey,
+    workspaceWithSession,
+    sessionId,
+    executionProcessId,
+    executorCanFork,
+    resetAction,
+  });
+  // Tag the entry's kind so a parent CSS scope (e.g. EmbeddedChatPane's
+  // `data-conversation-density="concise"`) can fade thinking / tool entries
+  // and highlight the agent's user-facing message without each leaf entry
+  // component having to know about that policy.
+  return (
+    <div data-entry-kind={entryType.type} className="contents">
+      {renderedEntry}
+    </div>
+  );
+}
+
+function renderEntryByType(
+  entryType: NormalizedEntry['entry_type'],
+  entry: NormalizedEntry,
+  ctx: {
+    props: Props;
+    t: ReturnType<typeof useTranslation<'common'>>['t'];
+    expansionKey: string;
+    workspaceWithSession: Props['workspaceWithSession'];
+    sessionId: string | undefined;
+    executionProcessId: string | undefined;
+    executorCanFork: boolean;
+    resetAction: Props['resetAction'];
+  }
+): React.ReactNode {
+  const {
+    props,
+    t,
+    expansionKey,
+    workspaceWithSession,
+    sessionId,
+    executionProcessId,
+    executorCanFork,
+    resetAction,
+  } = ctx;
   switch (entryType.type) {
     case 'tool_use':
       return renderToolUseEntry(entryType, entry, props, t);
