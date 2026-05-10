@@ -1071,6 +1071,25 @@ export const projectsApi = {
     const response = await makeRequest('/api/projects');
     return handleApiResponse<Project[]>(response);
   },
+
+  /**
+   * Create a local-only project (no remote/org linkage). Used by the
+   * local-mode "Create project" dialog. For the hosted/org-projects path,
+   * see CreateRemoteProjectDialog.
+   */
+  createLocal: async (
+    name: string,
+    defaultAgentWorkingDir?: string
+  ): Promise<Project> => {
+    const response = await makeRequest('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        default_agent_working_dir: defaultAgentWorkingDir,
+      }),
+    });
+    return handleApiResponse<Project>(response);
+  },
 };
 
 export const leadAgentApi = {

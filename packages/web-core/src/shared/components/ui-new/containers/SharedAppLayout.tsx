@@ -43,13 +43,17 @@ import {
   CreateRemoteProjectDialog,
   type CreateRemoteProjectResult,
 } from '@/shared/dialogs/org/CreateRemoteProjectDialog';
+import {
+  CreateLocalProjectDialog,
+  type CreateLocalProjectResult,
+} from '@/shared/dialogs/local/CreateLocalProjectDialog';
 import { OAuthDialog } from '@/shared/dialogs/global/OAuthDialog';
 import { SettingsDialog } from '@/shared/dialogs/settings/SettingsDialog';
 import { CommandBarDialog } from '@/shared/dialogs/command-bar/CommandBarDialog';
 import { useCommandBarShortcut } from '@/shared/hooks/useCommandBarShortcut';
 import { useWorkspaceSidebarPreviewController } from '@/shared/hooks/useWorkspaceSidebarPreviewController';
 import { useShape } from '@/shared/integrations/electric/hooks';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '@/shared/lib/api';
 import { sortProjectsByOrder } from '@/shared/lib/projectOrder';
 import {
@@ -333,8 +337,30 @@ export function SharedAppLayout() {
     [isSavingProjectOrder, orderedProjects, updateManyProjects]
   );
 
+  const queryClient = useQueryClient();
+
   const handleCreateProject = useCallback(async () => {
-    if (!selectedOrgId) return;
+    // Local-only mode: when no org is selected (not signed in to the
+    // org/cloud surface), fall through to the local-project dialog rather
+    // than silently failing. The `+` button on the AppBar's project rail
+    // is the same control either way.
+    if (!selectedOrgId) {
+      try {
+        const result: CreateLocalProjectResult =
+          await CreateLocalProjectDialog.show({});
+        if (result.action === 'created' && result.project) {
+          // Local projects come from /api/projects; refresh the layout's
+          // local-projects query so the new row shows up immediately.
+          await queryClient.invalidateQueries({
+            queryKey: ['layout-local-projects'],
+          });
+          appNavigation.goToProject(result.project.id);
+        }
+      } catch {
+        // Dialog cancelled
+      }
+      return;
+    }
 
     try {
       const result: CreateRemoteProjectResult =
@@ -346,7 +372,7 @@ export function SharedAppLayout() {
     } catch {
       // Dialog cancelled
     }
-  }, [selectedOrgId, appNavigation]);
+  }, [selectedOrgId, appNavigation, queryClient]);
 
   const handleSignIn = useCallback(async () => {
     try {
