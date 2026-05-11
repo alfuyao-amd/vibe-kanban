@@ -360,7 +360,12 @@ export function AppBar({
     });
   }
 
-  if (isSignedIn) {
+  // Always show the create-project button when a handler is wired. Local
+  // mode doesn't sign in to the cloud surface but still has its own
+  // create-project flow (the handler decides which dialog to open). Gating
+  // this on isSignedIn was the historical assumption that all projects are
+  // org-scoped — no longer true since local-mode project creation landed.
+  if (onCreateProject) {
     projectSectionItems.push({
       key: 'create-project',
       kind: 'icon-button',
