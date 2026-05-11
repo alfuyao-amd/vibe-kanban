@@ -294,9 +294,21 @@ export function SharedAppLayout() {
 
   const handleProjectClick = useCallback(
     (projectId: string) => {
+      // Local-only mode: the cloud kanban view (which goToProject targets)
+      // blocks on `isSignedIn` via LoginRequiredPrompt. Route clicks to the
+      // lead-agent page instead — it's the local-mode project home and
+      // works without an org/cloud account. Signed-in users still go to
+      // the kanban view.
+      if (!isSignedIn) {
+        void navigate({
+          to: '/projects/$projectId/lead-agent',
+          params: { projectId },
+        });
+        return;
+      }
       appNavigation.goToProject(projectId);
     },
-    [appNavigation]
+    [appNavigation, isSignedIn, navigate]
   );
 
   const handleProjectsDragEnd = useCallback(

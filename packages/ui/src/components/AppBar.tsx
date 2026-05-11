@@ -234,7 +234,8 @@ export function AppBar({
   activeProjectId,
   isSignedIn,
   isLoadingProjects,
-  onSignIn,
+  // onSignIn was only consumed by the now-removed kanban-cta popover.
+  // Still accepted as a prop so existing call-sites continue to type-check.
   onHoverStart,
   onHoverEnd,
   notificationBell,
@@ -335,14 +336,10 @@ export function AppBar({
 
   const projectSectionItems: AppBarSectionItem[] = [];
 
-  if (!isSignedIn) {
-    projectSectionItems.push({
-      key: 'kanban-cta',
-      kind: 'kanban-cta',
-      label: t('appBar.kanban.tooltip'),
-      onSignIn,
-    });
-  }
+  // The kanban-cta popover was a cloud-only sign-in marketing surface;
+  // skipped in local mode where the user runs the binary directly and has
+  // no cloud account. Functional sign-in controls remain in the user
+  // popover for anyone who actually wants to sync.
 
   if (isLoadingProjects) {
     projectSectionItems.push({ key: 'projects-loading', kind: 'loading' });
